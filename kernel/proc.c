@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+// #include "swapfile.h"
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -87,6 +87,15 @@ myproc(void)
   struct proc *p = c->proc;
   pop_off();
   return p;
+}
+
+struct proc* find_proc(int pid){
+  for(int i = 0;i < NPROC;i++){
+    if(proc[i].pid == pid){
+      return &proc[i];
+    }
+  }
+  return 0;
 }
 
 int
@@ -241,9 +250,11 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
+    //commented out for lazy
     if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) {
       return -1;
     }
+    // sz=sz+n;
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
@@ -514,7 +525,7 @@ forkret(void)
     // regular process (e.g., because it calls sleep), and thus cannot
     // be run from main().
     fsinit(ROOTDEV);
-
+    // swap_init();
     first = 0;
     // ensure other cores see first=0.
     __sync_synchronize();

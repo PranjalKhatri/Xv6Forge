@@ -8,6 +8,8 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
+#include "mru.h"
+#include "swapfile.h"
 
 void freerange(void *pa_start, void *pa_end);
 
@@ -21,13 +23,21 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  void *free_mem_start;
 } kmem;
+
+struct mru_node* page_to_mru_map[NUM_PAGES];
+int kalloc_cnt;
 
 void
 kinit()
 {
+  kalloc_cnt = 1;
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  kmem.free_mem_start= mru_init(end,NUM_PAGES,page_to_mru_map);
+  freerange(kmem.free_mem_start, (void*)PHYSTOP);
+  printf("NumPages: %d\n",NUM_PAGES);
+  printf("end : %p\n",kmem.free_mem_start);
 }
 
 void
@@ -48,7 +58,7 @@ kfree(void *pa)
 {
   struct run *r;
 
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < (char*)kmem.free_mem_start || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.
@@ -59,6 +69,7 @@ kfree(void *pa)
   acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
+  move_to_end(pa);
   release(&kmem.lock);
 }
 
@@ -69,14 +80,34 @@ void *
 kalloc(void)
 {
   struct run *r;
-
+  
   acquire(&kmem.lock);
+  printf("kalloc called %d\n",kalloc_cnt);
+  kalloc_cnt++;
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+  }else{
+    printf("swap out\n");
+    r=(struct run*)mru_swapout();
+  } 
   release(&kmem.lock);
+    if(r)
+    memset((char*)r, 5, PGSIZE); // Fill with junk after lock is released.
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void* kernel_swapin(int offset){
+  void* pa = kalloc();
+  if(pa == 0)
+    return 0; 
+  int pid_dummy;
+  uint64 va_dummy;
+  if(swap_in((char*)pa, &pid_dummy, &va_dummy, offset) != 0){
+    kfree(pa); // Read failed, so free the page we just allocated.
+    return 0;
+  }
+
+  return pa;
 }

@@ -59,7 +59,7 @@ void            ireclaim(int);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-
+void*           kernel_swapin(int offset);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -101,7 +101,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
-
+struct proc*    find_proc(int);
 // swtch.S
 void            swtch(struct context*, struct context*);
 
@@ -180,6 +180,9 @@ void            plic_complete(int);
 void            virtio_disk_init(void);
 void            virtio_disk_rw(struct buf *, int);
 void            virtio_disk_intr(void);
+
+//mru.c
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
