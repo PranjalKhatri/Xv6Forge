@@ -12,73 +12,117 @@ struct pagestat {
 uint random(uint seed) {
   return (seed * 1664525 + 1013904223);
 }
-int dump_pages;
-int
-main(int argc, char *argv[])
-{
-  dump_pages=5;
-  
+
+int dump_pages = 5;
+int current_policy = MRU_POLICY;  // Default to MRU
+
+void print_banner(const char* title) {
+  printf("\n=== %s ===\n", title);
+}
+
+void print_policy_info() {
+  if (current_policy == LRU_POLICY) {
+    printf("Replacement Policy: LRU (Least Recently Used)\n");
+    printf("-> Evicts pages that haven't been used for the longest time\n");
+  } else {
+    printf("Replacement Policy: MRU (Most Recently Used)\n");
+    printf("-> Evicts pages that were used most recently\n");
+  }
+}
+
+void print_stats(const char* event, struct pagestat* stats) {
+  printf("%s: Faults=%d, SwapOuts=%d, SwapIns=%d\n", 
+         event, stats->num_page_faults, stats->num_swap_outs, stats->num_swap_ins);
+}
+
+void print_mru_list() {
+  if (current_policy == LRU_POLICY) {
+    printf("\nPage Order (LRU->MRU, showing last %d pages):\n", dump_pages);
+    dumpmru(-dump_pages);  // Print last N pages for LRU
+  } else {
+    printf("\nPage Order (MRU->LRU, showing first %d pages):\n", dump_pages);
+    dumpmru(dump_pages);   // Print first N pages for MRU
+  }
+}
+
+int main(int argc, char *argv[]) {
   if(argc < 2){
     printf("USAGE: mrumem [numpages] [[dumps=5]] [[rep_policy=MRU/LRU]]\n");
+    printf("\nExamples:\n");
+    printf("  mrumem 50           # Test with 50 pages, show 5 pages, use MRU\n");
+    printf("  mrumem 100 10       # Test with 100 pages, show 10 pages, use MRU\n");
+    printf("  mrumem 75 8 LRU     # Test with 75 pages, show 8 pages, use LRU\n");
     return 1;
   }
+
   int num_pages = atoi(argv[1]);
+  
   if(argc >= 3){
     dump_pages = atoi(argv[2]);
-    printf("num_pages: %d | dump pages : %d \n",num_pages,dump_pages);
   }
+  
   if(argc >= 4){
     if(strcmp(argv[3],"LRU") == 0){
+      current_policy = LRU_POLICY;
       setreplacement_policy(LRU_POLICY);
-    }else 
+    } else {
+      current_policy = MRU_POLICY;
       setreplacement_policy(MRU_POLICY);
+    }
   }
 
   const int page_size = 4096;
   const int alloc_size = num_pages * page_size;
-
   char *memory;
   int mypid = getpid();
   struct pagestat stats;
 
-  printf("mrumem: Starting memory stress test...\n");
+  print_banner("MEMORY STRESS TEST");
+  printf("Test Configuration:\n");
+  printf("  Number of pages: %d (%d KB)\n", num_pages, alloc_size/1024);
+  printf("  Pages to display: %d\n", dump_pages);
+  printf("  Process ID: %d\n", mypid);
+  print_policy_info();
 
+  printf("\nAllocating virtual memory...\n");
   memory = sbrklazy(alloc_size);
   if (memory == (char*)-1) {
-    printf("mrumem: sbrk failed to allocate %d bytes\n", alloc_size);
+    printf("ERROR: sbrk failed to allocate %d bytes\n", alloc_size);
     exit(1);
   }
+  printf("SUCCESS: Allocated %d pages (%d KB)\n", num_pages, alloc_size/1024);
 
-  printf("mrumem: Successfully allocated %d pages (%d bytes).\n", num_pages, alloc_size);
+  // =================================================================
+  // PHASE 1: Write to every page
+  // =================================================================
+  print_banner("PHASE 1: SEQUENTIAL WRITE TEST");
+  printf("Writing unique values to all pages...\n");
+  printf("This will trigger page faults and potential swap-outs.\n\n");
   
-  // =================================================================
-  // PHASE 1: Write to every page to force allocation and swapping.
-  // =================================================================
-  printf("\n--- Phase 1: Writing to all pages ---\n");
-  printf("This will trigger page faults and swap-outs if memory is full.\n");
-
   for (int i = 1; i <= num_pages; i++) {
-    // Write a unique value to the first byte of each page.
-    // The value is based on the page number to verify correctness later.
     char *page_addr = memory + ((i-1) * page_size);
-    *page_addr = (char)((i-1) % 256); // Store page index (mod 256)
-    if (i > 0 && i % 20 == 0) {
+    *page_addr = (char)((i-1) % 256);
+    
+    if (i % 25 == 0 || i == num_pages) {
       getpagestat(mypid, &stats);
-      printf("After writing to page %d:\n", i);
-      printf("  Page Faults: %d, Swap-Outs: %d, Swap-Ins: %d\n", 
-             stats.num_page_faults, stats.num_swap_outs, stats.num_swap_ins);
+      printf("After writing page %d: ", i);
+      print_stats("", &stats);
+      
+      if (i % 50 == 0 || i == num_pages) {
+        print_mru_list();
+        printf("\n");
+      }
     }
   }
 
-  printf("\n--- Phase 1 Complete ---\n");
-  printf("All pages have been touched. Let's look at the dump list.\n");
-  dumpmru(dump_pages); 
-  
+  printf("PHASE 1 COMPLETE: All %d pages written\n", num_pages);
+
   // =================================================================
-  // PHASE 2: Read from pages randomly to verify data integrity.
+  // PHASE 2: Random read test
   // =================================================================
-  printf("\n--- Phase 2: Reading from pages randomly ---\n");
-  printf("This will trigger swap-ins for pages that were evicted.\n");
+  print_banner("PHASE 2: RANDOM READ VERIFICATION");
+  printf("Reading from pages randomly to verify data integrity...\n");
+  printf("This will trigger swap-ins for evicted pages.\n\n");
 
   int errors = 0;
   uint seed = uptime(); 
@@ -91,39 +135,51 @@ main(int argc, char *argv[])
     char expected_value = (char)(page_to_check % 256);
     char actual_value = *page_addr;
 
-    // Verify that the data is still correct
     if (actual_value != expected_value) {
-      printf("!!! DATA CORRUPTION ERROR on page %d: expected %d, got %d\n", 
+      printf("ERROR: Data corruption on page %d: expected %d, got %d\n", 
              page_to_check, expected_value, actual_value);
       errors++;
     }
-    if (i > 0 && i % 20 == 0) {
+    
+    if (i % 25 == 0 || i == num_pages) {
       getpagestat(mypid, &stats);
-      printf("After randomly reading page %d:\n", page_to_check);
-      printf("  Page Faults: %d, Swap-Outs: %d, Swap-Ins: %d\n", 
-             stats.num_page_faults, stats.num_swap_outs, stats.num_swap_ins);
-      printf("  Let's see the dump list now:\n");
-      dumpmru(dump_pages);
+      printf("After %d random reads: ", i);
+      print_stats("", &stats);
+      
+      if (i % 50 == 0 || i == num_pages) {
+        print_mru_list();
+        printf("\n");
+      }
     }
   }
 
-  printf("\n--- Phase 2 Complete ---\n");
-  
+  printf("PHASE 2 COMPLETE: %d random reads performed\n", num_pages);
+
   // =================================================================
   // Final Report
   // =================================================================
-  printf("\n--- Test Report ---\n");
+  print_banner("FINAL TEST RESULTS");
+  
   if (errors == 0) {
-    printf("SUCCESS: All pages contained the correct data.\n");
+    printf("SUCCESS: All pages contained correct data!\n");
+    printf("No data corruption detected during swap operations.\n");
   } else {
-    printf("FAILURE: Found %d pages with corrupted data.\n", errors);
+    printf("FAILURE: Found %d pages with corrupted data!\n", errors);
+    printf("This indicates a problem with the swapping mechanism.\n");
   }
 
   getpagestat(mypid, &stats);
-  printf("\nFinal Paging Statistics for pid %d:\n", mypid);
+  printf("\nFinal Statistics:\n");
+  printf("  Process ID:        %d\n", mypid);
+  printf("  Policy:            %s\n", (current_policy == LRU_POLICY) ? "LRU" : "MRU");
+  printf("  Pages Tested:      %d\n", num_pages);
   printf("  Total Page Faults: %d\n", stats.num_page_faults);
-  printf("  Total Swap-Outs: %d\n", stats.num_swap_outs);
-  printf("  Total Swap-Ins: %d\n", stats.num_swap_ins);
+  printf("  Total Swap-Outs:   %d\n", stats.num_swap_outs);
+  printf("  Total Swap-Ins:    %d\n", stats.num_swap_ins);
 
-  exit(0);
+  print_mru_list();
+  
+  printf("\nTest completed!\n");
+
+  exit(errors == 0 ? 0 : 1);
 }
