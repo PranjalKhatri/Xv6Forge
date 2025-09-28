@@ -6,6 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+#include "mru.h"
 
 uint64
 sys_exit(void)
@@ -104,4 +105,37 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_getpagestat(void)
+{
+  int pid;
+  uint64 stat_addr; 
+  struct proc *p;
+  struct pagestat stats;
+
+  argint(0, &pid); 
+  argaddr(1, &stat_addr);
+  
+  p = find_proc(pid); 
+  if(p == 0) {
+    return -1;
+  }
+
+  stats = p->pst;
+  if(copyout(p->pagetable, stat_addr, (char *)&stats, sizeof(stats)) < 0) {
+    return -1;
+  }
+
+  return 0;
+}
+
+uint64
+sys_dumpmru(void)
+{
+  int n;
+  argint(0,&n);
+  mru_dump(n);
+  return 0;
 }

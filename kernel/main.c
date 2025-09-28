@@ -28,9 +28,7 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
-    // swap_init();
-    // fsinit(ROOTDEV);
-    // swap_init();
+    swap_init();
     userinit();      // first user process
     __sync_synchronize();
     started = 1;

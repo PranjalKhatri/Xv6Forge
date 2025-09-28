@@ -1,6 +1,7 @@
 #define SBRK_ERROR ((char *)-1)
 
 struct stat;
+struct pagestat;
 
 // system calls
 int fork(void);
@@ -47,3 +48,6 @@ void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
 // umalloc.c
 void* malloc(uint);
 void free(void*);
+
+int getpagestat(int pid, struct pagestat *st);
+int dumpmru(int);

@@ -154,7 +154,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  memset(&p->pst,0,sizeof(p->pst));
   return p;
 }
 
@@ -277,7 +277,7 @@ kfork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -525,7 +525,6 @@ forkret(void)
     // regular process (e.g., because it calls sleep), and thus cannot
     // be run from main().
     fsinit(ROOTDEV);
-    // swap_init();
     first = 0;
     // ensure other cores see first=0.
     __sync_synchronize();

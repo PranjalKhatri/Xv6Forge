@@ -76,24 +76,32 @@ kfree(void *pa)
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+// Corrected kalloc function
 void *
 kalloc(void)
 {
   struct run *r;
   
   acquire(&kmem.lock);
-  printf("kalloc called %d\n",kalloc_cnt);
-  kalloc_cnt++;
   r = kmem.freelist;
   if(r){
     kmem.freelist = r->next;
-  }else{
-    printf("swap out\n");
-    r=(struct run*)mru_swapout();
-  } 
+    release(&kmem.lock); // Release lock for the simple case
+    memset((char*)r, 5, PGSIZE); // fill with junk
+    return (void*)r;
+  }
+  // printf("kalloc: No free page in freelist\n");
+  // Freelist is empty. Release the lock BEFORE calling the function
+  // that will perform disk I/O.
   release(&kmem.lock);
-    if(r)
-    memset((char*)r, 5, PGSIZE); // Fill with junk after lock is released.
+  printf("swapout request\n");
+  // Now it is safe to call mru_swapout(), which may sleep.
+  // r = (struct run*)mru_swapout();
+  r = (struct run*)lru_swapout();
+  if(r) {
+    // The reclaimed page also needs to be filled with junk.
+    memset((char*)r, 5, PGSIZE);
+  }
 
   return (void*)r;
 }

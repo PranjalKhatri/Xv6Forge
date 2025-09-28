@@ -5,99 +5,72 @@
 #include "fs.h"
 #include "spinlock.h"
 #include "sleeplock.h"
-#include "file.h"
-#include "stat.h"
-#include "swapfile.h"
+#include "buf.h"
 
+// Define where on the disk our swap space begins.
+// This must be after the space used by the file system.
+// You might need to adjust this value. 2000 is a safe starting guess.
+#define SWAP_START_BLK 1000
+#define SWAP_SIZE_IN_BLOCKS 750 // Reserve 2000 blocks for swap
+#define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
 
-// Defines the block structure written to the swap file.
-struct swap_block {
-  int pid;
-  uint64 va;
-  char page_data[PGSIZE];
-};
-
-
-static struct inode *swap_inode;
 static struct spinlock swap_lock;
-static uint next_swap_offset;
+static uint next_swap_block; // The next free block number on disk
 
-// Must be called after fsinit()
 void
 swap_init(void)
 {
-  printf("swap init start\n");
   initlock(&swap_lock, "swap_lock");
-  next_swap_offset = 0;
-
-  begin_op();
-  swap_inode = namei("/_swap");
-  if (swap_inode == 0) {
-    swap_inode = ialloc(ROOTDEV, T_FILE);
-    if (swap_inode == 0)
-      panic("swap_init: ialloc failed");
-    ilock(swap_inode);
-    iupdate(swap_inode);
-    iput(swap_inode);
-  }
-  end_op();
-  printf("swap init done\n");
+  next_swap_block = 0;
 }
 
-// Writes a block (metadata + page) to the swap file.
-// Returns the offset in the file, or -1 on error.
+// Writes a 4096-byte page to four 1024-byte disk blocks.
+// Returns the starting block number.
 int
 swap_out(char *page_data, int pid, uint64 va)
 {
-  struct swap_block block;
-  int offset;
-
-  // Prepare the block on the stack
-  block.pid = pid;
-  block.va = va;
-  memmove(block.page_data, page_data, PGSIZE);
+  uint start_blockno;
 
   acquire(&swap_lock);
-  offset = next_swap_offset;
-  next_swap_offset += sizeof(struct swap_block);
   
-  if (next_swap_offset >= MAXFILE * BSIZE) {
+  // Check if there are enough free blocks for one full page
+  if((next_swap_block + BLOCKS_PER_PAGE) > SWAP_SIZE_IN_BLOCKS) {
+    printf("swap_out: out of swap space\n");
     release(&swap_lock);
-    return -1; // Swap file is full
+    return -1;
   }
+
+  start_blockno = SWAP_START_BLK + next_swap_block;
+  next_swap_block += BLOCKS_PER_PAGE; // Reserve 4 blocks
+  
   release(&swap_lock);
 
-  // Write the entire block to the file
-  ilock(swap_inode);
-  if (writei(swap_inode, 0, (uint64)&block, offset, sizeof(struct swap_block)) != sizeof(struct swap_block)) {
-    iunlock(swap_inode);
-    return -1;
+  // Write the page to disk, one block at a time.
+  for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
+    struct buf *b = bread(ROOTDEV, start_blockno + i);
+    memmove(b->data, page_data + (i * BSIZE), BSIZE);
+    bwrite(b);
+    brelse(b);
   }
-  iunlock(swap_inode);
   
-  return offset;
+  return start_blockno;
 }
 
-// Reads a block from the swap file.
-// Fills the buffer with page data and pid_out/va_out with metadata.
+// Reads four 1024-byte disk blocks into a 4096-byte page.
 // Returns 0 on success, -1 on error.
 int
-swap_in(char *buffer, int *pid_out, uint64 *va_out, uint offset)
+swap_in(char *buffer, int *pid_out, uint64 *va_out, uint start_blockno)
 {
-  struct swap_block block;
-
-  // Read the entire block from the file
-  ilock(swap_inode);
-  if (readi(swap_inode, 0, (uint64)&block, offset, sizeof(struct swap_block)) != sizeof(struct swap_block)) {
-    iunlock(swap_inode);
-    return -1;
+  // Read the page from disk, one block at a time.
+  for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
+    struct buf *b = bread(ROOTDEV, start_blockno + i);
+    memmove(buffer + (i * BSIZE), b->data, BSIZE);
+    brelse(b);
   }
-  iunlock(swap_inode);
 
-  // Copy the data out to the provided buffers
-  memmove(buffer, block.page_data, PGSIZE);
-  *pid_out = block.pid;
-  *va_out = block.va;
+  // Return default metadata values
+  *pid_out = -1;
+  *va_out = 0;
 
   return 0;
 }

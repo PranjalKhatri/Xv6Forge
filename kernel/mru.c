@@ -9,6 +9,7 @@
 #include "swapfile.h"
 
 int req_pages;
+int mru_map_len;
 char *map_start;
 static struct mru_node **mru_map;
 static struct mru_node *head, *end;
@@ -20,7 +21,8 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     initlock(&mru_lock, "mru_lock");
     req_pages = (sizeof(struct mru_node) * num_pages + PGSIZE - 1) / PGSIZE;
     mru_map = map;
-    
+    mru_map_len = num_pages - req_pages;
+
     char *p = (char *)PGROUNDUP((uint64)pa_start);
     char *pa = p + req_pages * PGSIZE;
     map_start = pa;
@@ -41,13 +43,15 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     }
     head = map[0];
     end = map[num_pages - req_pages - 1];
-    
+
     printf("mru init end\n");
     return (char *)PGROUNDUP((uint64)pa_start) + req_pages * PGSIZE;
 }
-int P2I(void *pa)
+int PA2IDX(void *pa)
 {
-    return (int)((char *)pa - map_start) / PGSIZE;
+    int idx =(int)((char *)pa - map_start) / PGSIZE;
+    if(idx >= mru_map_len || idx < 0)panic("PA2IDX"); 
+    return idx;
 }
 void map_neighbors(int idx)
 {
@@ -55,23 +59,27 @@ void map_neighbors(int idx)
         mru_map[idx]->prev->next = mru_map[idx]->next;
     if (mru_map[idx]->next)
         mru_map[idx]->next->prev = mru_map[idx]->prev;
+    mru_map[idx]->prev = 0;
+    mru_map[idx]->next = 0;
 }
 
-void __move_to_end_unlocked(void* pa)
+void __move_to_end_unlocked(void *pa)
 {
-    int idx = P2I(pa);
-    if(mru_map[idx] == end) return;
-    if(mru_map[idx] == head) head=head->next;
+    int idx = PA2IDX(pa);
+    if (mru_map[idx] == end)
+        return;
+    if (mru_map[idx] == head)
+        head = head->next;
     map_neighbors(idx);
-    mru_map[idx]->next=0;
     end->next = mru_map[idx];
-    mru_map[idx]->prev=end;
+    mru_map[idx]->next = 0;
+    mru_map[idx]->prev = end;
     end = mru_map[idx];
 }
-void move_to_end(void* pa)
+void move_to_end(void *pa)
 {
     acquire(&mru_lock);
-    int idx = P2I(pa);
+    int idx = PA2IDX(pa);
     mru_map[idx]->pid = -1;
     mru_map[idx]->va = 0;
     __move_to_end_unlocked(pa);
@@ -80,10 +88,9 @@ void move_to_end(void* pa)
 
 void move_to_head(void *pa)
 {
-    int idx = P2I(pa);
+    int idx = PA2IDX(pa);
     if (mru_map[idx] == head)
     {
-        release(&mru_lock);
         return;
     }
     if (mru_map[idx] == end)
@@ -104,25 +111,148 @@ void move_to_head_and_set(void *pa, int pid, int va)
     release(&mru_lock);
 }
 
-void* mru_swapout()
-{
-    acquire(&mru_lock);
-    void* victim_pa = head->pa;
-    int victim_pid = head->pid;
-    uint64 victim_va = head->va;
-    int offset = swap_out(victim_pa, victim_pid, victim_va);
-    if(offset >= 0){
-        pte_t* victim_ptep = walk(find_proc(victim_pid)->pagetable, victim_va, 0);
-        if(victim_ptep)
-            *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
-    }
-    __move_to_end_unlocked(victim_pa);
+// In kernel/mru.c
 
+void *
+mru_swapout()
+{
+    void *victim_pa;
+    int victim_pid;
+    uint64 victim_va;
+    struct proc *victim_proc;
+    int offset;
+    acquire(&mru_lock);
+    if (head == 0)
+    {
+        release(&mru_lock);
+        return 0;
+    }
+    victim_pa = head->pa;
+    victim_pid = head->pid;
+    victim_va = head->va;
     release(&mru_lock);
+
+    offset = swap_out(victim_pa, victim_pid, victim_va);
+    if (offset < 0)
+    {
+        return 0;
+    }
+
+    acquire(&mru_lock);
+    victim_proc = find_proc(victim_pid);
+    if (victim_proc)
+    {
+        pte_t *victim_ptep = walk(victim_proc->pagetable, victim_va, 0);
+        // Ensure the PTE still exists and belongs to the page we swapped out
+        if (victim_ptep && (*victim_ptep & PTE_V) && PTE2PA(*victim_ptep) == (uint64)victim_pa)
+        {
+            *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
+            victim_proc->pst.num_swap_outs++;
+        }
+    }
+    __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
+    release(&mru_lock);
+
     return victim_pa;
 }
+
+void quarantine_reserved_pages(void) {
+    printf("quarantining!\n");
+    struct mru_node *cur = head;
+    struct mru_node *orig_end = end;  // remember original end
+    struct mru_node *next;
+    while(cur != orig_end){
+        next = cur->next;
+        if(cur->pid <= 2){
+            if(cur == head)head = head->next;
+            map_neighbors(PA2IDX(cur->pa));
+            __move_to_end_unlocked(cur->pa);
+        }
+        cur = next;
+    }
+    end = cur->prev;
+    printf("end now points to %d\n", end->pid);
+}
+
+void *
+lru_swapout()
+{
+    static int cnt;
+    void *victim_pa = 0;
+    int victim_pid = -1;
+    uint64 victim_va = 0;
+    struct proc *victim_proc;
+    int offset;
+
+    acquire(&mru_lock);
+    if(cnt == 0){
+        quarantine_reserved_pages();
+        cnt=1;
+    }
+    if (end == 0) {
+        release(&mru_lock);
+        return 0;
+    }
+
+    struct mru_node *cur = end;
+    struct mru_node *start = head;
+    struct mru_node *cand = 0;
+    do {
+        if (cur->pid >= 3) {    // eligible user-mapped page
+            cand = cur;
+            break;
+        }
+        cur = cur->prev;
+    } while (cur && cur != start);
+
+    if (!cand) {
+        release(&mru_lock);
+        return 0;
+    }
+    victim_pa  = cand->pa;
+    victim_pid = cand->pid;
+    victim_va  = cand->va;
+    release(&mru_lock);
+
+    printf("lru swapout: \n");
+    printf("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va);
+    if (offset < 0) {
+        printf("lru swapout : swapout failed\n");
+        return 0;
+    }
+    acquire(&mru_lock);
+    printf("lru swapout successful; OFFSET: %d\n",offset);
+    victim_proc = find_proc(victim_pid);
+    if (victim_proc) {
+        printf("successfully found the victim proc\n");
+        pte_t *victim_ptep = walk(victim_proc->pagetable, victim_va, 0);
+        if (victim_ptep && (*victim_ptep & PTE_V) && PTE2PA(*victim_ptep) == (uint64)victim_pa) {
+            *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
+            victim_proc->pst.num_swap_outs++;
+        }
+        printf("updated ptes\n");
+    }
+    __move_to_end_unlocked(victim_pa);
+    release(&mru_lock);
+
+    return victim_pa;
+}
+
 
 struct mru_node *mru_get_end()
 {
     return end;
+}
+
+void mru_dump(int n)
+{
+    struct mru_node *tmp = head;
+    int i = 0;
+    while (i < n && tmp)
+    {
+        printf("PID: %d  | VA: %d  | PA: %p \n", tmp->pid, tmp->va, tmp->pa);
+        tmp = tmp->next;
+        i++;
+    }
 }

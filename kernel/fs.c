@@ -45,6 +45,7 @@ fsinit(int dev) {
     panic("invalid file system");
   initlog(dev, &sb);
   ireclaim(dev);
+  printf("disk size in blocks: %d\n", sb.size);
 }
 
 // Zero a block.

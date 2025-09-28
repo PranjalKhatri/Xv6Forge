@@ -12,5 +12,8 @@ void move_to_end(void * pa);
 void move_to_head_and_set(void * pa,int pid,int va);
 
 void* mru_swapout();
+void* lru_swapout();
 
 struct mru_node* mru_get_end();
+
+void mru_dump(int n);

@@ -240,6 +240,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    move_to_head_and_set(mem, myproc()->pid, a);
   }
   return newsz;
 }
@@ -301,7 +302,7 @@ void uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
-int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz,int child_pid)
 {
   pte_t *pte;
   uint64 pa, i;
@@ -324,7 +325,9 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
+    move_to_head_and_set(mem, child_pid, i);
   }
+  
   return 0;
 
 err:
@@ -474,7 +477,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
   uint64 mem;
   pte_t *pte;
   struct proc *p = myproc();
-
+  p->pst.num_page_faults++;
   if (va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va);
@@ -489,7 +492,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     mem = (uint64)kernel_swapin(offset);
     if (mem == 0)
       return 0;
-    move_to_head_and_set((void *)mem, p->pid, va);
+    p->pst.num_swap_ins++;
   }
   else
   {
@@ -497,8 +500,8 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     if (mem == 0)
       return 0;
     memset((void *)mem, 0, PGSIZE);
-    move_to_head_and_set((void *)mem, p->pid, va);
   }
+  move_to_head_and_set((void *)mem, p->pid, va);
   if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W | PTE_U | PTE_R) != 0)
   {
     kfree((void *)mem);

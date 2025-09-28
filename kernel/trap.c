@@ -71,8 +71,6 @@ usertrap(void)
   } else if((r_scause() == 15 || r_scause() == 13) ) {
     if(vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0){
       // page fault on lazily-allocated page
-    }else{
-      //check for 
     }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
