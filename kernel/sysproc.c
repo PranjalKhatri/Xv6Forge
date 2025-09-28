@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "vm.h"
 #include "mru.h"
+#include "kalloc.h"
 
 uint64
 sys_exit(void)
@@ -137,5 +138,17 @@ sys_dumpmru(void)
   int n;
   argint(0,&n);
   mru_dump(n);
+  return 0;
+}
+
+uint64 
+sys_setreplacement_policy(void){
+  extern int replacement_policy;
+  int policy;
+  argint(0,&policy);
+  if(policy != MRU_POLICY && policy != LRU_POLICY){
+    return -1;
+  }
+  replacement_policy = policy;
   return 0;
 }

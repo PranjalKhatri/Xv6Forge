@@ -10,6 +10,9 @@
 #include "defs.h"
 #include "mru.h"
 #include "swapfile.h"
+#include "kalloc.h"
+
+int replacement_policy;
 
 void freerange(void *pa_start, void *pa_end);
 
@@ -33,6 +36,7 @@ void
 kinit()
 {
   kalloc_cnt = 1;
+  replacement_policy = MRU_POLICY;
   initlock(&kmem.lock, "kmem");
   kmem.free_mem_start= mru_init(end,NUM_PAGES,page_to_mru_map);
   freerange(kmem.free_mem_start, (void*)PHYSTOP);
@@ -94,10 +98,12 @@ kalloc(void)
   // Freelist is empty. Release the lock BEFORE calling the function
   // that will perform disk I/O.
   release(&kmem.lock);
-  printf("swapout request\n");
+  // printf("swapout request\n");
   // Now it is safe to call mru_swapout(), which may sleep.
-  // r = (struct run*)mru_swapout();
-  r = (struct run*)lru_swapout();
+  if(replacement_policy == MRU_POLICY)
+    r = (struct run*)mru_swapout();
+  else 
+    r = (struct run*)lru_swapout();
   if(r) {
     // The reclaimed page also needs to be filled with junk.
     memset((char*)r, 5, PGSIZE);

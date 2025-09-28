@@ -45,3 +45,4 @@ entry("uptime");
 
 entry("getpagestat");
 entry("dumpmru");
+entry("setreplacement_policy");

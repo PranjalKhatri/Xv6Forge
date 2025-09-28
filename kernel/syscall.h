@@ -23,3 +23,4 @@
 
 #define SYS_getpagestat 22
 #define SYS_dumpmru 23
+#define SYS_setreplacement_policy 24

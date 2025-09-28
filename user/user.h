@@ -51,3 +51,4 @@ void free(void*);
 
 int getpagestat(int pid, struct pagestat *st);
 int dumpmru(int);
+int setreplacement_policy(int);

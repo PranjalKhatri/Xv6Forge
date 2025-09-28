@@ -302,7 +302,7 @@ void uvmfree(pagetable_t pagetable, uint64 sz)
 // physical memory.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
-int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz,int child_pid)
+int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
 {
   pte_t *pte;
   uint64 pa, i;
@@ -327,7 +327,7 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz,int child_pid)
     }
     move_to_head_and_set(mem, child_pid, i);
   }
-  
+
   return 0;
 
 err:
@@ -364,7 +364,7 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
-      if ((pa0 = vmfault(pagetable, va0, 0)) == 0)
+      if ((pa0 = vmfault(pagetable, va0, 0,0)) == 0)
       {
         return -1;
       }
@@ -400,7 +400,7 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
-      if ((pa0 = vmfault(pagetable, va0, 0)) == 0)
+      if ((pa0 = vmfault(pagetable, va0, 0,0)) == 0)
       {
         return -1;
       }
@@ -472,7 +472,7 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // returns 0 if va is invalid or already mapped, or if
 // out of physical memory, and physical address if successful.
 uint64
-vmfault(pagetable_t pagetable, uint64 va, int read)
+vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
 {
   uint64 mem;
   pte_t *pte;
@@ -502,7 +502,20 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     memset((void *)mem, 0, PGSIZE);
   }
   move_to_head_and_set((void *)mem, p->pid, va);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W | PTE_U | PTE_R) != 0)
+  int perm = PTE_U;
+  if (instruction)
+  {
+    perm |= PTE_R | PTE_X; // executable page
+  }
+  else if (read)
+  {
+    perm |= PTE_R;
+  }
+  else
+  {
+    perm |= PTE_W | PTE_R;
+  }
+  if (mappages(p->pagetable, va, PGSIZE, mem, perm) != 0)
   {
     kfree((void *)mem);
     return 0;
