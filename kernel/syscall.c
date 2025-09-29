@@ -104,7 +104,7 @@ extern uint64 sys_close(void);
 extern uint64 sys_getpagestat(void);
 extern uint64 sys_dumpmru(void);
 extern uint64 sys_setreplacement_policy(void);
-
+extern uint64 sys_getfreemem(void);
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
 static uint64 (*syscalls[])(void) = {
@@ -129,6 +129,8 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+
+[SYS_getfreemem] sys_getfreemem,
 [SYS_getpagestat] sys_getpagestat,
 [SYS_dumpmru]   sys_dumpmru,
 [SYS_setreplacement_policy] sys_setreplacement_policy,

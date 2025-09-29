@@ -13,8 +13,8 @@
 #include "kalloc.h"
 
 int replacement_policy;
-
-void freerange(void *pa_start, void *pa_end);
+uint64 numfreepages;
+int freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -39,18 +39,21 @@ kinit()
   replacement_policy = MRU_POLICY;
   initlock(&kmem.lock, "kmem");
   kmem.free_mem_start= mru_init(end,NUM_PAGES,page_to_mru_map);
-  freerange(kmem.free_mem_start, (void*)PHYSTOP);
-  printf("NumPages: %d\n",NUM_PAGES);
-  printf("end : %p\n",kmem.free_mem_start);
+  numfreepages = freerange(kmem.free_mem_start, (void*)PHYSTOP);
+  debug("NumPages    : %d\nNumFreePages: %ld\n",NUM_PAGES,numfreepages);
+  debug("end     : %p\nPHYSTOP : %p\n",kmem.free_mem_start,(void*)PHYSTOP);
+
 }
 
-void
+int
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
-  p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  int i=0;
+  p = (char*)PGROUNDUP((uint64)pa_start,PGSIZE);
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE,i++)
     kfree(p);
+  return i;
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -74,6 +77,7 @@ kfree(void *pa)
   r->next = kmem.freelist;
   kmem.freelist = r;
   move_to_end(pa);
+  numfreepages++;
   release(&kmem.lock);
 }
 
@@ -88,12 +92,14 @@ kalloc(void)
   
   acquire(&kmem.lock);
   r = kmem.freelist;
+  numfreepages--;
   if(r){
     kmem.freelist = r->next;
     release(&kmem.lock); // Release lock for the simple case
     memset((char*)r, 5, PGSIZE); // fill with junk
     return (void*)r;
   }
+
   // printf("kalloc: No free page in freelist\n");
   // Freelist is empty. Release the lock BEFORE calling the function
   // that will perform disk I/O.
@@ -124,4 +130,15 @@ void* kernel_swapin(int offset){
   }
 
   return pa;
+}
+
+uint64
+sys_getfreemem(void)
+{
+  uint64 free_mem_bytes;
+  acquire(&kmem.lock); 
+  // printf("free: %ld\n",numfreepages);
+  free_mem_bytes = numfreepages * PGSIZE;
+  release(&kmem.lock);
+  return free_mem_bytes; 
 }

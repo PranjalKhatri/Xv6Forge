@@ -17,13 +17,13 @@ struct spinlock mru_lock;
 
 void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
 {
-    printf("mru init start\n");
+    debug("mru init start\n");
     initlock(&mru_lock, "mru_lock");
     req_pages = (sizeof(struct mru_node) * num_pages + PGSIZE - 1) / PGSIZE;
     mru_map = map;
     mru_map_len = num_pages - req_pages;
 
-    char *p = (char *)PGROUNDUP((uint64)pa_start);
+    char *p = (char *)PGROUNDUP((uint64)pa_start,PGSIZE);
     char *pa = p + req_pages * PGSIZE;
     map_start = pa;
     // use the req pages to store the mappings and start after it.
@@ -44,8 +44,8 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     head = map[0];
     end = map[num_pages - req_pages - 1];
 
-    printf("mru init end\n");
-    return (char *)PGROUNDUP((uint64)pa_start) + req_pages * PGSIZE;
+    debug("mru init end\n");
+    return (char *)PGROUNDUP((uint64)pa_start,PGSIZE) + req_pages * PGSIZE;
 }
 int PA2IDX(void *pa)
 {
@@ -159,7 +159,7 @@ mru_swapout()
 
 void quarantine_reserved_pages(void)
 {
-    // printf("quarantining!\n");
+    // debug("quarantining!\n");
     struct mru_node *cur = head;
     struct mru_node *orig_end = end; // remember original end
     struct mru_node *next;
@@ -176,7 +176,7 @@ void quarantine_reserved_pages(void)
         cur = next;
     }
     end = cur->prev;
-    // printf("end now points to %d\n", end->pid);
+    // debug("end now points to %d\n", end->pid);
 }
 
 void *
@@ -224,27 +224,27 @@ lru_swapout()
     victim_va = cand->va;
     release(&mru_lock);
 
-    // printf("lru swapout: \n");
-    // printf("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
+    // debug("lru swapout: \n");
+    // debug("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
     offset = swap_out(victim_pa, victim_pid, victim_va);
     if (offset < 0)
     {
-        // printf("lru swapout : swapout failed\n");
+        // debug("lru swapout : swapout failed\n");
         return 0;
     }
     acquire(&mru_lock);
-    // printf("lru swapout successful; OFFSET: %d\n",offset);
+    // debug("lru swapout successful; OFFSET: %d\n",offset);
     victim_proc = find_proc(victim_pid);
     if (victim_proc)
     {
-        // printf("successfully found the victim proc\n");
+        // debug("successfully found the victim proc\n");
         pte_t *victim_ptep = walk(victim_proc->pagetable, victim_va, 0);
         if (victim_ptep && (*victim_ptep & PTE_V) && PTE2PA(*victim_ptep) == (uint64)victim_pa)
         {
             *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
             victim_proc->pst.num_swap_outs++;
         }
-        // printf("updated ptes\n");
+        // debug("updated ptes\n");
     }
     __move_to_end_unlocked(victim_pa);
     release(&mru_lock);

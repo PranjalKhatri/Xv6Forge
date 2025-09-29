@@ -17,6 +17,51 @@ extern char etext[]; // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+static uint64 pt_pages_allocated = 0;    // Total page table pages allocated
+static uint64 pt_leaf_mappings = 0;      // Total leaf mappings (actual memory pages mapped)
+static uint64 pt_superpage_mappings = 0; // Super page mappings
+
+pte_t *
+k_walk(pagetable_t pagetable, uint64 va, int alloc, int levels);
+
+int k_mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm, int level);
+void print_pagetable_stats(void);
+
+#ifdef NO_SUPERPAGES
+void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm){
+  if(size > 0)
+    kvmmap(pagetable, va, va, size, perm, 0); // Force regular pages
+}
+#else
+//  maps the va onto the direct pa
+//  unaligned (regular page)
+//  aligned (super page)
+//  unaligned (regular page)
+void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm)
+{
+  uint64 aligned_start = PGROUNDUP(va, SUPER_PGSIZE);
+  uint64 unaligned_sz = aligned_start - va;
+  // Check if we even have enough size for super pages
+  if (unaligned_sz >= size)
+  {
+    // The entire range is smaller than one super page boundary
+    // Just use regular pages for everything
+    if (size > 0)
+      kvmmap(pagetable, va, va, size, perm, 0);
+    return;
+  }
+
+  uint64 aligned_sz = PGROUNDDOWN(size - unaligned_sz, SUPER_PGSIZE);
+  uint64 rem = size - aligned_sz - unaligned_sz;
+
+  if (unaligned_sz)
+    kvmmap(pagetable, va, va, unaligned_sz, perm, 0);
+  if (aligned_sz)
+    kvmmap(pagetable, aligned_start, aligned_start, aligned_sz, perm, 1);
+  if (rem)
+    kvmmap(pagetable, aligned_start + aligned_sz, aligned_start + aligned_sz, rem, perm, 0);
+}
+#endif
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -25,38 +70,50 @@ kvmmake(void)
 
   kpgtbl = (pagetable_t)kalloc();
   memset(kpgtbl, 0, PGSIZE);
+  debug("kpgtbl allocated at: %p\n", &kpgtbl);
 
   // uart registers
-  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+  kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W, 0);
+  debug("UART mapped\n");
 
   // virtio mmio disk interface
-  kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+  kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W, 0);
+  debug("VIRTIO mapped\n");
 
   // PLIC
-  kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W);
+  kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W, 0);
+  debug("PLIC mapped\n");
 
   // map kernel text executable and read-only.
-  kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
+  debug("Mapping text: KERNBASE=%ld, etext=%ld, size=%ld\n",
+         KERNBASE, (uint64)etext, (uint64)etext - KERNBASE);
+  k_mapaligned(kpgtbl, KERNBASE, (uint64)etext - KERNBASE, PTE_R | PTE_X);
+  debug("Text mapped successfully\n");
 
   // map kernel data and the physical RAM we'll make use of.
-  kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
+  debug("Mapping data: etext=%ld, PHYSTOP=%ld, size=%ld\n",
+         (uint64)etext, PHYSTOP, PHYSTOP - (uint64)etext);
+  k_mapaligned(kpgtbl, (uint64)etext, PHYSTOP - (uint64)etext, PTE_R | PTE_W);
 
-  // map the trampoline for trap entry/exit to
-  // the highest virtual address in the kernel.
-  kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  // map the trampoline
+  kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X, 0);
+  debug("Trampoline mapped\n");
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
+  debug("Process stacks mapped\n");
 
+  print_pagetable_stats();
   return kpgtbl;
 }
 
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
-void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
+/// @param use_superpg whether to use superpage table or not for the given va
+void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm, int use_superpg)
 {
-  if (mappages(kpgtbl, va, sz, pa, perm) != 0)
+  if (k_mappages(kpgtbl, va, sz, pa, perm, 2 - use_superpg) != 0)
     panic("kvmmap");
 }
 
@@ -94,12 +151,27 @@ void kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
+  return k_walk(pagetable, va, alloc, 2);
+}
+
+// walk levels down.
+// design choice: used levels instead of a boolean for super page to allow to increase page size even more in future
+pte_t *
+k_walk(pagetable_t pagetable, uint64 va, int alloc, int _levels)
+{
   if (va >= MAXVA)
     panic("walk");
+  if (_levels < 1)
+    _levels = 1;
+  if (_levels > 3)
+    _levels = 3;
 
+  pte_t *pte;
   for (int level = 2; level > 0; level--)
   {
-    pte_t *pte = &pagetable[PX(level, va)];
+    pte = &pagetable[PX(level, va)];
+    if (level == 1 && _levels == 1)
+      return pte;
     if (*pte & PTE_V)
     {
       pagetable = (pagetable_t)PTE2PA(*pte);
@@ -110,8 +182,10 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
         return 0;
       memset(pagetable, 0, PGSIZE);
       *pte = PA2PTE(pagetable) | PTE_V;
+      pt_pages_allocated++;
     }
   }
+
   return &pagetable[PX(0, va)];
 }
 
@@ -145,31 +219,44 @@ walkaddr(pagetable_t pagetable, uint64 va)
 // allocate a needed page-table page.
 int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
+  return k_mappages(pagetable, va, size, pa, perm, 2);
+}
+
+int k_mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm, int level)
+{
   uint64 a, last;
   pte_t *pte;
-
-  if ((va % PGSIZE) != 0)
+  uint64 alignment_sz = (level == 2) ? PGSIZE : SUPER_PGSIZE;
+  if ((va % alignment_sz) != 0)
     panic("mappages: va not aligned");
 
-  if ((size % PGSIZE) != 0)
+  if ((size % alignment_sz) != 0)
     panic("mappages: size not aligned");
 
   if (size == 0)
     panic("mappages: size");
 
   a = va;
-  last = va + size - PGSIZE;
+  last = va + size - alignment_sz;
+  // debug("mappages: mapping from %ld to %ld\n", va, last);
   for (;;)
   {
-    if ((pte = walk(pagetable, a, 1)) == 0)
+    if ((pte = k_walk(pagetable, a, 1, level)) == 0)
       return -1;
     if (*pte & PTE_V)
       panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+
+    // Count mappings
+    if (level == 1)
+      pt_superpage_mappings++;
+    else
+      pt_leaf_mappings++;
+
     if (a == last)
       break;
-    a += PGSIZE;
-    pa += PGSIZE;
+    a += alignment_sz;
+    pa += alignment_sz;
   }
   return 0;
 }
@@ -224,7 +311,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
   if (newsz < oldsz)
     return oldsz;
 
-  oldsz = PGROUNDUP(oldsz);
+  oldsz = PGROUNDUP(oldsz, PGSIZE);
   for (a = oldsz; a < newsz; a += PGSIZE)
   {
     mem = kalloc();
@@ -255,10 +342,10 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   if (newsz >= oldsz)
     return oldsz;
 
-  if (PGROUNDUP(newsz) < PGROUNDUP(oldsz))
+  if (PGROUNDUP(newsz, PGSIZE) < PGROUNDUP(oldsz, PGSIZE))
   {
-    int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
-    uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    int npages = (PGROUNDUP(oldsz, PGSIZE) - PGROUNDUP(newsz, PGSIZE)) / PGSIZE;
+    uvmunmap(pagetable, PGROUNDUP(newsz, PGSIZE), npages, 1);
   }
 
   return newsz;
@@ -292,7 +379,7 @@ void freewalk(pagetable_t pagetable)
 void uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if (sz > 0)
-    uvmunmap(pagetable, 0, PGROUNDUP(sz) / PGSIZE, 1);
+    uvmunmap(pagetable, 0, PGROUNDUP(sz, PGSIZE) / PGSIZE, 1);
   freewalk(pagetable);
 }
 
@@ -357,14 +444,14 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while (len > 0)
   {
-    va0 = PGROUNDDOWN(dstva);
+    va0 = PGROUNDDOWN(dstva, PGSIZE);
     if (va0 >= MAXVA)
       return -1;
 
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
-      if ((pa0 = vmfault(pagetable, va0, 0,0)) == 0)
+      if ((pa0 = vmfault(pagetable, va0, 0, 0)) == 0)
       {
         return -1;
       }
@@ -396,11 +483,11 @@ int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 
   while (len > 0)
   {
-    va0 = PGROUNDDOWN(srcva);
+    va0 = PGROUNDDOWN(srcva, PGSIZE);
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
     {
-      if ((pa0 = vmfault(pagetable, va0, 0,0)) == 0)
+      if ((pa0 = vmfault(pagetable, va0, 0, 0)) == 0)
       {
         return -1;
       }
@@ -428,7 +515,7 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 
   while (got_null == 0 && max > 0)
   {
-    va0 = PGROUNDDOWN(srcva);
+    va0 = PGROUNDDOWN(srcva, PGSIZE);
     pa0 = walkaddr(pagetable, va0);
     if (pa0 == 0)
       return -1;
@@ -480,7 +567,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   p->pst.num_page_faults++;
   if (va >= p->sz)
     return 0;
-  va = PGROUNDDOWN(va);
+  va = PGROUNDDOWN(va, PGSIZE);
   pte = walk(pagetable, va, 0);
   if (pte == 0 || ismapped(pagetable, va))
   {
@@ -535,4 +622,35 @@ int ismapped(pagetable_t pagetable, uint64 va)
     return 1;
   }
   return 0;
+}
+
+// Add this function to print statistics
+void print_pagetable_stats(void)
+{
+  printf("\n=== Kernel Page Table Statistics ===\n");
+  printf("Page table pages allocated: %ld (using %ld KB)\n", 
+         pt_pages_allocated, (pt_pages_allocated * PGSIZE) / 1024);
+  printf("Regular page mappings: %ld\n", pt_leaf_mappings);
+  printf("Super page mappings: %ld (each covers 2MB)\n", pt_superpage_mappings);
+  printf("Total memory mapped: %lld MB\n", 
+         (pt_leaf_mappings * PGSIZE + pt_superpage_mappings * SUPER_PGSIZE) / (1024*1024));
+  
+  // Calculate theoretical pages needed without super pages
+  uint64 total_memory_mapped = pt_leaf_mappings * PGSIZE + pt_superpage_mappings * SUPER_PGSIZE;
+  uint64 pages_if_no_superpages = total_memory_mapped / PGSIZE;
+  
+  // Each 512 leaf entries needs 1 page table page
+  // Plus level-1 pages (1 per 512 level-0 pages) 
+  // Plus 1 root page
+  uint64 level0_pages_needed = (pages_if_no_superpages + 511) / 512;
+  uint64 level1_pages_needed = (level0_pages_needed + 511) / 512;
+  uint64 total_pages_without_super = 1 + level1_pages_needed + level0_pages_needed;
+  
+  printf("\n--- Comparison ---\n");
+  printf("With super pages: %ld page table pages\n", pt_pages_allocated);
+  printf("Without super pages (estimated): %ld page table pages\n", total_pages_without_super);
+  printf("Savings: %ld pages (%ld KB)\n", 
+         total_pages_without_super - pt_pages_allocated,
+         ((total_pages_without_super - pt_pages_allocated) * PGSIZE) / 1024);
+  printf("====================================\n\n");
 }

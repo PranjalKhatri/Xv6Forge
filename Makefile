@@ -144,7 +144,9 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
-	$U/_mrumem
+	$U/_mrumem\
+	$U/_freememtest\
+	$U/_sbrktest
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

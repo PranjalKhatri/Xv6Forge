@@ -60,6 +60,7 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 void*           kernel_swapin(int offset);
+uint64          sys_getfreemem(void);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -153,7 +154,7 @@ int             uartgetc(void);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
-void            kvmmap(pagetable_t, uint64, uint64, uint64, int);
+void            kvmmap(pagetable_t, uint64, uint64, uint64, int,int);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);
 uint64          uvmalloc(pagetable_t, uint64, uint64, int);
@@ -186,3 +187,10 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+#define DEBUG 1
+
+#if DEBUG
+  #define debug(fmt, ...) printf(fmt, ##__VA_ARGS__)
+#else
+  #define debug(fmt, ...)
+#endif

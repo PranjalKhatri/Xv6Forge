@@ -43,6 +43,7 @@ entry("sbrk");
 entry("pause");
 entry("uptime");
 
+entry("getfreemem");
 entry("getpagestat");
 entry("dumpmru");
 entry("setreplacement_policy");

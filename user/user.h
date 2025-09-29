@@ -49,6 +49,7 @@ void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
 void* malloc(uint);
 void free(void*);
 
+int getfreemem(void);
 int getpagestat(int pid, struct pagestat *st);
 int dumpmru(int);
 int setreplacement_policy(int);
