@@ -40,7 +40,7 @@ kinit()
   initlock(&kmem.lock, "kmem");
   kmem.free_mem_start= mru_init(end,NUM_PAGES,page_to_mru_map);
   numfreepages = freerange(kmem.free_mem_start, (void*)PHYSTOP);
-  debug("NumPages    : %d\nNumFreePages: %ld\n",NUM_PAGES,numfreepages);
+  debug("NumPages    : %ld\nNumFreePages: %ld\n",NUM_PAGES,numfreepages);
   debug("end     : %p\nPHYSTOP : %p\n",kmem.free_mem_start,(void*)PHYSTOP);
 
 }

@@ -38,8 +38,9 @@
 // from physical address 0x80000000 to PHYSTOP.
 #define KERNBASE 0x80000000L
 // #define PHYSTOP (KERNBASE + 128*1024*1024)
-#define NUM_PAGES   1024*32
-#define PHYSTOP (KERNBASE + NUM_PAGES*PGSIZE) //kernel took ~33 frames in testing, add overload of kernel page table and other it came out to be 256
+#define RAM_SIZE 256L*1024*1024
+#define NUM_PAGES RAM_SIZE/PGSIZE
+#define PHYSTOP (KERNBASE + RAM_SIZE) //kernel took ~33 frames in testing, add overload of kernel page table and other it came out to be 256
 
 // map the trampoline page to the highest address,
 // in both user and kernel space.

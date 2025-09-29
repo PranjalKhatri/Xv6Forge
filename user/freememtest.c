@@ -3,5 +3,5 @@
 
 int main(){
     int mem = getfreemem();
-    printf("free mem available is %dB, %dKB\n",mem,mem/1024);
+    printf("free mem available is %dB, %dKB,%dMB\n",mem,mem/1024,mem/(1024*1024));
 }

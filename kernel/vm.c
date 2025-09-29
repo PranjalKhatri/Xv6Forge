@@ -21,47 +21,14 @@ static uint64 pt_pages_allocated = 0;    // Total page table pages allocated
 static uint64 pt_leaf_mappings = 0;      // Total leaf mappings (actual memory pages mapped)
 static uint64 pt_superpage_mappings = 0; // Super page mappings
 
+void 
+k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm);
 pte_t *
 k_walk(pagetable_t pagetable, uint64 va, int alloc, int levels);
-
-int k_mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm, int level);
+int 
+k_mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm, int level);
 void print_pagetable_stats(void);
 
-#ifdef NO_SUPERPAGES
-void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm){
-  if(size > 0)
-    kvmmap(pagetable, va, va, size, perm, 0); // Force regular pages
-}
-#else
-//  maps the va onto the direct pa
-//  unaligned (regular page)
-//  aligned (super page)
-//  unaligned (regular page)
-void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm)
-{
-  uint64 aligned_start = PGROUNDUP(va, SUPER_PGSIZE);
-  uint64 unaligned_sz = aligned_start - va;
-  // Check if we even have enough size for super pages
-  if (unaligned_sz >= size)
-  {
-    // The entire range is smaller than one super page boundary
-    // Just use regular pages for everything
-    if (size > 0)
-      kvmmap(pagetable, va, va, size, perm, 0);
-    return;
-  }
-
-  uint64 aligned_sz = PGROUNDDOWN(size - unaligned_sz, SUPER_PGSIZE);
-  uint64 rem = size - aligned_sz - unaligned_sz;
-
-  if (unaligned_sz)
-    kvmmap(pagetable, va, va, unaligned_sz, perm, 0);
-  if (aligned_sz)
-    kvmmap(pagetable, aligned_start, aligned_start, aligned_sz, perm, 1);
-  if (rem)
-    kvmmap(pagetable, aligned_start + aligned_sz, aligned_start + aligned_sz, rem, perm, 0);
-}
-#endif
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -161,8 +128,8 @@ k_walk(pagetable_t pagetable, uint64 va, int alloc, int _levels)
 {
   if (va >= MAXVA)
     panic("walk");
-  if (_levels < 1)
-    _levels = 1;
+  if (_levels < 0)
+    _levels = 0;
   if (_levels > 3)
     _levels = 3;
 
@@ -170,7 +137,7 @@ k_walk(pagetable_t pagetable, uint64 va, int alloc, int _levels)
   for (int level = 2; level > 0; level--)
   {
     pte = &pagetable[PX(level, va)];
-    if (level == 1 && _levels == 1)
+    if (2-level == _levels)
       return pte;
     if (*pte & PTE_V)
     {
@@ -654,3 +621,41 @@ void print_pagetable_stats(void)
          ((total_pages_without_super - pt_pages_allocated) * PGSIZE) / 1024);
   printf("====================================\n\n");
 }
+
+
+#ifdef NO_SUPERPAGES
+void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm){
+  if(size > 0)
+    kvmmap(pagetable, va, va, size, perm, 0); // Force regular pages
+}
+#else
+//  maps the va onto the direct pa
+//  unaligned (regular page)
+//  aligned (super page)
+//  unaligned (regular page)
+void k_mapaligned(pagetable_t pagetable, uint64 va, uint64 size, int perm)
+{
+  uint64 aligned_start = PGROUNDUP(va, SUPER_PGSIZE);
+  uint64 unaligned_sz = aligned_start - va;
+  // Check if we even have enough size for super pages
+  if (unaligned_sz >= size)
+  {
+    // The entire range is smaller than one super page boundary
+    // Just use regular pages for everything
+    if (size > 0)
+      kvmmap(pagetable, va, va, size, perm, 0);
+    return;
+  }
+
+  uint64 aligned_sz = PGROUNDDOWN(size - unaligned_sz, SUPER_PGSIZE);
+  uint64 rem = size - aligned_sz - unaligned_sz;
+
+  if (unaligned_sz)
+    kvmmap(pagetable, va, va, unaligned_sz, perm, 0);
+  if (aligned_sz)
+    kvmmap(pagetable, aligned_start, aligned_start, aligned_sz, perm, 1);
+  if (rem)
+    kvmmap(pagetable, aligned_start + aligned_sz, aligned_start + aligned_sz, rem, perm, 0);
+}
+
+#endif
