@@ -219,7 +219,10 @@ void shebang_run(struct execcmd *ecmd)
       if (i >= MAXARGS)
         panic("too many args");
       new_argv[i] = 0; // NULL termination
-
+      for(int j = 0;j < i;j++){
+        printf("%s ",new_argv[j]);
+      }
+      printf("\n");
       // Execute the interpreter with the new argument list
       exec(new_argv[0], new_argv);
 
@@ -248,7 +251,7 @@ getcmd(char *buf, int nbuf)
 
 
 int
-main(void)
+main(int argc,char **argv)
 {
   static char buf[100];
   int fd;
@@ -260,7 +263,33 @@ main(void)
       break;
     }
   }
+  if (argc > 1)
+  {
+    // Concatenate all arguments into a single command string
+    buf[0] = '\0';
+    for (int i = 1; i < argc; i++)
+    {
+      strcat(buf, argv[i]);
+      if (i + 1 < argc)
+        strcat(buf, " ");
+    }
+    strcat(buf, "\n");
 
+    char *cmd = buf;
+    if (cmd[0] == 'c' && cmd[1] == 'd' && cmd[2] == ' ')
+    {
+      cmd[strlen(cmd) - 1] = 0; // chop \n
+      if (chdir(cmd + 3) < 0)
+        fprintf(2, "cannot cd %s\n", cmd + 3);
+    }
+    else
+    {
+      if (fork1() == 0)
+        runcmd(parsecmd(cmd));
+      wait(0);
+    }
+    exit(0); // only run the given command(s), then quit
+  }
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
     char *cmd = buf;
@@ -500,7 +529,7 @@ parseredirs(struct cmd *cmd, char **ps, char *es)
       cmd = redircmd(cmd, q, eq, O_WRONLY|O_CREATE|O_TRUNC, 1);
       break;
     case '+':  // >>
-      cmd = redircmd(cmd, q, eq, O_WRONLY|O_CREATE, 1);
+      cmd = redircmd(cmd, q, eq, O_WRONLY|O_CREATE|O_APPEND, 1);
       break;
     }
   }
