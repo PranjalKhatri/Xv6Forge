@@ -35,6 +35,18 @@ strcmp(const char *p, const char *q)
     p++, q++;
   return (uchar)*p - (uchar)*q;
 }
+char*
+strcat(char *dest, const char *src)
+{
+  char *d = dest;
+  // move d to the end of dest
+  while (*d)
+    d++;
+  // copy src into dest
+  while ((*d++ = *src++) != 0)
+    ;
+  return dest;
+}
 
 uint
 strlen(const char *s)
