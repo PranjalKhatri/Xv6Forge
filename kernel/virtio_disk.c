@@ -150,7 +150,7 @@ virtio_disk_init(void)
   *R(VIRTIO_MMIO_STATUS) = status;
 
   // plic.c and trap.c arrange for interrupts from VIRTIO0_IRQ.
-  printf("virtio disk init complete\n");
+  debug("virtio disk init complete\n");
 }
 
 // find a free descriptor, mark it non-free, return its index.

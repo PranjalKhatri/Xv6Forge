@@ -70,7 +70,7 @@ kvmmake(void)
   proc_mapstacks(kpgtbl);
   debug("Process stacks mapped\n");
 
-  print_pagetable_stats();
+  // print_pagetable_stats();
   return kpgtbl;
 }
 
