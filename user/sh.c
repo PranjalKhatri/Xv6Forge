@@ -53,6 +53,7 @@ int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
 void runcmd(struct cmd*) __attribute__((noreturn));
+void shebang_run(struct execcmd*);
 
 // Execute cmd.  Never returns.
 void
@@ -77,6 +78,7 @@ runcmd(struct cmd *cmd)
     if(ecmd->argv[0] == 0)
       exit(1);
     exec(ecmd->argv[0], ecmd->argv);
+    shebang_run(ecmd);
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
 
@@ -131,6 +133,107 @@ runcmd(struct cmd *cmd)
   exit(0);
 }
 
+void shebang_run(struct execcmd *ecmd)
+{
+  char *path = ecmd->argv[0];
+  int fd;
+  char buf[128];
+  char *interpreter = 0;
+  char *opt_arg = 0;
+  if ((fd = open(path, O_RDONLY)) >= 0)
+  {
+    int n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n >= 2 && buf[0] == '#' && buf[1] == '!')
+    {
+      buf[n] = 0; // null terminate the buffer
+      // Skip "#!"
+      char *s = buf + 2;
+      // Skip leading whitespace after #!
+      while (*s == ' ' || *s == '\t')
+        s++;
+      // Extract interpreter path
+      interpreter = s;
+      while (*s && *s != ' ' && *s != '\t' && *s != '\n')
+        s++;
+
+      if (s == interpreter)
+      { // No interpreter path found
+        fprintf(2, "script %s: invalid shebang\n", path);
+        // exit(1);
+        return;
+      }
+      // Null-terminate the interpreter path (temporarily, in buf)
+      if (*s != '\n')
+      { // If there's more on the line (potential option or trailing space)
+        *s++ = 0;
+
+        // Skip whitespace before optional argument
+        while (*s == ' ' || *s == '\t')
+          s++;
+
+        // Extract optional argument
+        if (*s != '\n' && *s != 0)
+        {
+          opt_arg = s;
+          while (*s && *s != ' ' && *s != '\t' && *s != '\n')
+            s++;
+          *s = 0; // Null-terminate the optional argument
+        }
+      }
+      else
+      {
+        *s = 0; // Null-terminate the interpreter path
+      }
+
+      // 3. Rebuild Argument Vector (argv)
+
+      // New arguments will be stored in argv, which has MAXARGS capacity
+      char *new_argv[MAXARGS];
+      int i = 0;
+      int j = 0;
+
+      // argv[0] = Interpreter
+      new_argv[i++] = interpreter;
+
+      // If optional argument exists, argv[1] = OptionalArg
+      if (opt_arg)
+      {
+        if (i >= MAXARGS)
+          panic("too many args");
+        new_argv[i++] = opt_arg;
+      }
+
+      // argv[1] or argv[2] = Script Path
+      if (i >= MAXARGS)
+        panic("too many args");
+      new_argv[i++] = path;
+
+      // Shift original arguments (starting from argv[1]) down
+      j = 1;
+      while (ecmd->argv[j] && i < MAXARGS)
+      {
+        new_argv[i++] = ecmd->argv[j++];
+      }
+
+      if (i >= MAXARGS)
+        panic("too many args");
+      new_argv[i] = 0; // NULL termination
+
+      // Execute the interpreter with the new argument list
+      exec(new_argv[0], new_argv);
+
+      // If the interpreter execution fails
+      // fprintf(2, "exec %s failed\n", new_argv[0]);
+      // exit(1);
+      return;
+    }
+    // Else (it's a script without shebang, e.g., a simple sh script),
+    // standard xv6 shells often try to execute it with /bin/sh.
+    // We omit that fallback for a pure shebang implementation.
+  }
+}
+
 int
 getcmd(char *buf, int nbuf)
 {
@@ -141,6 +244,8 @@ getcmd(char *buf, int nbuf)
     return -1;
   return 0;
 }
+
+
 
 int
 main(void)
