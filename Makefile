@@ -147,10 +147,15 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_mrumem\
 	$U/_freememtest\
-	$U/_sbrktest
+	$U/_sbrktest\
+	$U/_buffervuln\
+	
+EXTERNAL_FILES=\
+	README\
+	$U/exploit.bin
 
-fs.img: mkfs/mkfs README $(UPROGS)
-	mkfs/mkfs fs.img README $(UPROGS)
+fs.img: mkfs/mkfs $(EXTERNAL_FILES) $(UPROGS)
+	mkfs/mkfs fs.img $(EXTERNAL_FILES) $(UPROGS)
 
 -include kernel/*.d user/*.d
 
