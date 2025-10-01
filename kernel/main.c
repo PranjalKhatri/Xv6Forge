@@ -4,6 +4,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "swapfile.h"
+#include "random.h"
+
 volatile static int started = 0;
 
 // start() jumps here in supervisor mode on all CPUs.
@@ -28,7 +30,8 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
-    swap_init();
+    swap_init();      //initializ the swap locks
+    srand(rdtsc());   //seed the rng for the kernel
     userinit();      // first user process
     __sync_synchronize();
     started = 1;
