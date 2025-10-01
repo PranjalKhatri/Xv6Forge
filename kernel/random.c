@@ -3,12 +3,13 @@
 // Linear Congruential Generator (LCG)
 // Simple and fast PRNG suitable for xv6
 static uint64 rng_state;
+// Read RISC-V cycle counter for seed
 uint64
-rdtsc(void)
+rdtime(void)
 {
-  uint32 lo, hi;
-  asm volatile("rdtsc" : "=a" (lo), "=d" (hi));
-  return ((uint64)hi << 32) | lo;
+  uint64 x;
+  asm volatile("rdtime %0" : "=r" (x));
+  return x;
 }
 // Initialize the RNG with a seed
 void

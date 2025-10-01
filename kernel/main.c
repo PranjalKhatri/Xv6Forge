@@ -31,7 +31,7 @@ main()
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
     swap_init();      //initializ the swap locks
-    srand(rdtsc());   //seed the rng for the kernel
+    srand(rdtime());   //seed the rng for the kernel
     userinit();      // first user process
     __sync_synchronize();
     started = 1;
