@@ -101,8 +101,8 @@ tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
-U_CFLAGS = $(CFLAGS) -fPIE 
-U_LDFLAGS = $(LDFLAGS)
+U_CFLAGS = $(CFLAGS) -fPIE -pie -fPIC
+U_LDFLAGS = $(LDFLAGS) 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(U_LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
 	$(OBJDUMP) -S $@ > $*.asm
@@ -115,11 +115,11 @@ $U/usys.o : $U/usys.S
 	$(CC) $(U_CFLAGS) -c -o $U/usys.o $U/usys.S
 
 ## use generic rule to allow fpie
-# $U/_forktest: $U/forktest.o $(ULIB)
-# 	# forktest has less library code linked in - needs to be small
-# 	# in order to be able to max out the proc table.
-# 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_forktest $U/forktest.o $U/ulib.o $U/usys.o
-# 	$(OBJDUMP) -S $U/_forktest > $U/forktest.asm
+$U/_forktest: $U/forktest.o $(ULIB)
+	# forktest has less library code linked in - needs to be small
+	# in order to be able to max out the proc table.
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_forktest $U/forktest.o $U/ulib.o $U/usys.o
+	$(OBJDUMP) -S $U/_forktest > $U/forktest.asm
 
 mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 	gcc -Wno-unknown-attributes -I. -o mkfs/mkfs mkfs/mkfs.c
@@ -154,6 +154,7 @@ UPROGS=\
 	$U/_freememtest\
 	$U/_sbrktest\
 	$U/_buffervuln\
+	$U/_aslrtest
 	
 EXTERNAL_FILES=\
 	README\
