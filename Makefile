@@ -35,7 +35,7 @@ OBJS = \
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
-#TOOLPREFIX = 
+TOOLPREFIX = riscv64-linux-gnu-
 
 # Try to infer the correct TOOLPREFIX if not set
 ifndef TOOLPREFIX
@@ -76,7 +76,7 @@ CFLAGS += -fno-builtin-memcpy -Wno-main
 CFLAGS += -fno-builtin-printf -fno-builtin-fprintf -fno-builtin-vprintf
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
-CFLAGS += $(EXTRA_CFLAGS)
+CFLAGS += $(EXTRA_CFLAGS) -pie -fPIE
 
 ### commented because we want ASLR
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
@@ -101,12 +101,32 @@ tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
-U_CFLAGS = $(CFLAGS) -fPIE -pie -fPIC
-U_LDFLAGS = $(LDFLAGS) 
-_%: %.o $(ULIB) $U/user.ld
+U_CFLAGS = $(CFLAGS) -pie -fPIE -fPIC -static
+U_LDFLAGS = $(LDFLAGS) -pie -fPIE -shared
+
+ASLRUPROGS=\
+	$U/_aslrtest
+
+ASLROBJS := $(patsubst $(U)/_%, $(U)/%.o, $(ASLRUPROGS))
+
+CUSTOMUPROGS=\
+	$U/_mrumem\
+	$U/_freememtest\
+	$U/_sbrktest\
+	$U/_buffervuln
+
+$(ASLROBJS): $(U)/%.o: $(U)/%.c
+	$(CC) $(U_CFLAGS) -c -o $@ $<
+$(ASLRUPROGS): $U/_% : $U/%.o $(ULIB) $U/user.ld
 	$(LD) $(U_LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
 	$(OBJDUMP) -S $@ > $*.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
+
+_%: %.o $(ULIB) $U/user.ld
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
+	$(OBJDUMP) -S $@ > $*.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
+
 
 $U/usys.S : $U/usys.pl
 	perl $U/usys.pl > $U/usys.S
@@ -129,7 +149,6 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 # details:
 # http://www.gnu.org/software/make/manual/html_node/Chained-Rules.html
 .PRECIOUS: %.o
-
 UPROGS=\
 	$U/_cat\
 	$U/_echo\
@@ -149,13 +168,10 @@ UPROGS=\
 	$U/_zombie\
 	$U/_logstress\
 	$U/_forphan\
-	$U/_dorphan\
-	$U/_mrumem\
-	$U/_freememtest\
-	$U/_sbrktest\
-	$U/_buffervuln\
-	$U/_aslrtest
-	
+	$U/_dorphan
+UPROGS += $(CUSTOMUPROGS)
+UPROGS += $(ASLRUPROGS)
+
 EXTERNAL_FILES=\
 	README\
 	$U/exploit.bin
