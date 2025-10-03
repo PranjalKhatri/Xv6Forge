@@ -113,7 +113,8 @@ CUSTOMUPROGS=\
 	$U/_mrumem\
 	$U/_freememtest\
 	$U/_sbrktest\
-	$U/_buffervuln
+	$U/_buffervuln\
+	$U/_xargs
 
 $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
