@@ -2,7 +2,7 @@
 
 struct stat;
 struct pagestat;
-
+struct procinfo;
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));
@@ -54,3 +54,4 @@ int getfreemem(void);
 int getpagestat(int pid, struct pagestat *st);
 int dumpmru(int);
 int setreplacement_policy(int);
+int getprocinfo(struct procinfo*);
