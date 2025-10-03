@@ -115,7 +115,8 @@ CUSTOMUPROGS=\
 	$U/_sbrktest\
 	$U/_buffervuln\
 	$U/_xargs\
-	$U/_ps
+	$U/_ps\
+	$U/_top
 
 $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
