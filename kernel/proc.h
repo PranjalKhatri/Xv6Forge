@@ -87,16 +87,6 @@ struct pagestat {
   int num_swap_outs;
 };
 
-#define PROC_NAME_SIZE 16
-struct procinfo {
-  int pid;
-  int ppid;
-  enum procstate state;
-  uint64 sz;  //in bytes
-  char name[PROC_NAME_SIZE];
-  int cputicks;           // Total CPU time in ticks 
-};
-
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -119,7 +109,7 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
-  char name[PROC_NAME_SIZE];               // Process name (debugging)
+  char name[PROC_NAME_SZ];               // Process name (debugging)
   struct pagestat pst;
   int cputicks;
 };
