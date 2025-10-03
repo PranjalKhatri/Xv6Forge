@@ -27,7 +27,7 @@ rand(void)
 }
 
 uint64
-rand_range(uint64 max)
+rand_range(uint64 min,uint64 max)
 {
-  return rand() % max;
+  return rand() % max+min;
 }
