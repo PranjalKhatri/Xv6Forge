@@ -119,8 +119,8 @@ $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
 $(ASLRUPROGS): $U/_% : $U/%.o $(ULIB) $U/user.ld
 	$(LD) $(U_LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
-	$(OBJDUMP) -S $@ > $*.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $*.sym
+	$(OBJDUMP) -S $@ > $(@D)/$*.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(@D)/$*.sym
 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
