@@ -193,3 +193,6 @@ void            virtio_disk_intr(void);
 #else
   #define debug(fmt, ...)
 #endif
+
+#define DEBUG_PRINT(flag, fmt, ...) \
+  do { if (flag) debug(fmt, ##__VA_ARGS__); } while(0)
