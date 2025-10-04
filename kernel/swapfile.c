@@ -6,12 +6,8 @@
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "buf.h"
+#include "swapspace.h"
 
-// Define where on the disk our swap space begins.
-// This must be after the space used by the file system.
-// You might need to adjust this value. 2000 is a safe starting guess.
-#define SWAP_START_BLK 1000
-#define SWAP_SIZE_IN_BLOCKS 750 // Reserve 2000 blocks for swap
 #define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
 
 static struct spinlock swap_lock;
@@ -20,6 +16,7 @@ static uint next_swap_block; // The next free block number on disk
 void
 swap_init(void)
 {
+  debug("swap_init()\n");
   initlock(&swap_lock, "swap_lock");
   next_swap_block = 0;
 }
@@ -29,31 +26,35 @@ swap_init(void)
 int
 swap_out(char *page_data, int pid, uint64 va)
 {
-  uint start_blockno;
-
-  acquire(&swap_lock);
-  
-  // Check if there are enough free blocks for one full page
-  if((next_swap_block + BLOCKS_PER_PAGE) > SWAP_SIZE_IN_BLOCKS) {
-    printf("swap_out: out of swap space\n");
-    release(&swap_lock);
+  int start_blockno = allocate_block(BLOCKS_PER_PAGE);  
+  if (start_blockno < 0) {
+    printf("swap_out: out of swap space.\n");
     return -1;
   }
-
-  start_blockno = SWAP_START_BLK + next_swap_block;
-  next_swap_block += BLOCKS_PER_PAGE; // Reserve 4 blocks
-  
-  release(&swap_lock);
-
   // Write the page to disk, one block at a time.
   for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
     struct buf *b = bread(ROOTDEV, start_blockno + i);
+    if (!b) {
+      printf("swap_out: error reading buffer for block %d. Freeing allocated blocks.\n", start_blockno + i);
+      free_block(start_blockno, BLOCKS_PER_PAGE);
+      return -1;
+    }
     memmove(b->data, page_data + (i * BSIZE), BSIZE);
     bwrite(b);
     brelse(b);
   }
   
   return start_blockno;
+}
+
+// Releases the blocks previously allocated by swap_out back to the pool.
+void
+swap_free(int start_blockno)
+{
+  if (start_blockno < 0) {
+    return; 
+  }
+  free_block(start_blockno, BLOCKS_PER_PAGE);
 }
 
 // Reads four 1024-byte disk blocks into a 4096-byte page.
@@ -64,6 +65,10 @@ swap_in(char *buffer, int *pid_out, uint64 *va_out, uint start_blockno)
   // Read the page from disk, one block at a time.
   for (int i = 0; i < BLOCKS_PER_PAGE; i++) {
     struct buf *b = bread(ROOTDEV, start_blockno + i);
+    if (!b) {
+      printf("swap_in: error reading block %d\n", start_blockno + i);
+      return -1;
+    }
     memmove(buffer + (i * BSIZE), b->data, BSIZE);
     brelse(b);
   }
@@ -71,6 +76,6 @@ swap_in(char *buffer, int *pid_out, uint64 *va_out, uint start_blockno)
   // Return default metadata values
   *pid_out = -1;
   *va_out = 0;
-
+  swap_free(start_blockno);
   return 0;
 }
