@@ -7,14 +7,7 @@
 #include "defs.h"
 #include "elf.h"
 #include "random.h"
-
-#ifndef DEBUG_SYMTAB
-#define DEBUG_SYMTAB 0
-#endif
-
-#ifndef DEBUG_RELOC
-#define DEBUG_RELOC 0
-#endif
+#include "config.h"
 
 static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
 
