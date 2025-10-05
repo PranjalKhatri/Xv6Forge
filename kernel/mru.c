@@ -115,7 +115,7 @@ void move_to_head_and_set(void *pa, int pid, int va)
 // In kernel/mru.c
 
 void *
-mru_swapout()
+mru_swapout(int* refcnt_list)
 {
     void *victim_pa;
     int victim_pid;
@@ -132,8 +132,8 @@ mru_swapout()
     victim_pid = head->pid;
     victim_va = head->va;
     release(&mru_lock);
-
-    offset = swap_out(victim_pa, victim_pid, victim_va);
+    uint64 idx = pa_to_index((uint64)victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va,refcnt_list[idx]);
     if (offset < 0)
     {
         return 0;
@@ -180,7 +180,7 @@ void quarantine_reserved_pages(void)
 }
 
 void *
-lru_swapout()
+lru_swapout(int* refcnt_list)
 {
     static int cnt;
     void *victim_pa = 0;
@@ -226,7 +226,8 @@ lru_swapout()
 
     // debug("lru swapout: \n");
     // debug("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
-    offset = swap_out(victim_pa, victim_pid, victim_va);
+    uint64 idx = pa_to_index((uint64)victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va,refcnt_list[idx]);
     if (offset < 0)
     {
         // debug("lru swapout : swapout failed\n");

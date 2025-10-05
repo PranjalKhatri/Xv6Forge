@@ -31,6 +31,17 @@ struct {
 
 struct mru_node* page_to_mru_map[NUM_PAGES];
 int kalloc_cnt;
+int refcnt[NUM_PAGES]={0};
+
+#define PA_TO_IDX(pa) (((uint64)(pa) - (uint64)kmem.free_mem_start) >> PGSHIFT)
+uint64
+pa_to_index(uint64 pa)
+{
+  return PA_TO_IDX(pa);
+}
+
+void incref(uint64 pa);
+void decref(uint64 pa);
 
 void
 kinit()
@@ -51,8 +62,15 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   int i=0;
   p = (char*)PGROUNDUP((uint64)pa_start,PGSIZE);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE,i++)
-    kfree(p);
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE,i++){
+    memset(p, 1, PGSIZE);
+    struct run* r = (struct run *)p;
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    move_to_end(p);
+    release(&kmem.lock);
+  }
   return i;
 }
 
@@ -63,22 +81,10 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
-  struct run *r;
-
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < (char*)kmem.free_mem_start || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
-
-  r = (struct run*)pa;
-
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  move_to_end(pa);
-  numfreepages++;
-  release(&kmem.lock);
+  decref((uint64)pa);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -95,6 +101,9 @@ kalloc(void)
   numfreepages--;
   if(r){
     kmem.freelist = r->next;
+    uint64 idx = PA_TO_IDX(r);
+    if (idx >= NUM_PAGES) {printf("%ld %p ",idx,r);panic("kalloc: pa index out of bounds");}
+    refcnt[idx] = 1;
     release(&kmem.lock); // Release lock for the simple case
     memset((char*)r, 5, PGSIZE); // fill with junk
     return (void*)r;
@@ -107,10 +116,15 @@ kalloc(void)
   // printf("swapout request\n");
   // Now it is safe to call mru_swapout(), which may sleep.
   if(replacement_policy == MRU_POLICY)
-    r = (struct run*)mru_swapout();
+    r = (struct run*)mru_swapout(refcnt);
   else 
-    r = (struct run*)lru_swapout();
+    r = (struct run*)lru_swapout(refcnt);
   if(r) {
+    acquire(&kmem.lock); 
+    uint64 idx = PA_TO_IDX(r);
+    if (idx >= NUM_PAGES) panic("kalloc: swapped pa index out of bounds");
+    refcnt[idx] = 1; 
+    release(&kmem.lock);
     // The reclaimed page also needs to be filled with junk.
     memset((char*)r, 5, PGSIZE);
   }
@@ -124,12 +138,56 @@ void* kernel_swapin(int offset){
     return 0; 
   int pid_dummy;
   uint64 va_dummy;
-  if(swap_in((char*)pa, &pid_dummy, &va_dummy, offset) != 0){
+  int stored_refcnt;
+  if(swap_in((char*)pa, &pid_dummy, &va_dummy, offset,&stored_refcnt) != 0){
     kfree(pa); // Read failed, so free the page we just allocated.
     return 0;
   }
-
+  acquire(&kmem.lock);
+  if (stored_refcnt < 1) panic("kernel_swapin: Retrieved refcnt is less than 1");
+  refcnt[PA_TO_IDX(pa)]=stored_refcnt;
+  release(&kmem.lock);
   return pa;
+}
+
+void incref(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < (char *)kmem.free_mem_start || pa >= PHYSTOP)
+    panic("incref: invalid pa");
+
+  uint64 idx = PA_TO_IDX(pa);
+
+  acquire(&kmem.lock);
+  if (idx >= NUM_PAGES || refcnt[idx] < 1)
+    panic("incref: index out of bounds or zero count");
+  refcnt[idx]++;
+  release(&kmem.lock);
+}
+
+void decref(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < (char *)kmem.free_mem_start || pa >= PHYSTOP)
+    panic("decref: invalid pa");
+
+  uint64 idx = PA_TO_IDX(pa);
+  int c;
+
+  acquire(&kmem.lock);
+  if (idx >= NUM_PAGES || refcnt[idx] < 1)
+    panic("decref: index out of bounds or already zero");
+
+  c = --refcnt[idx];
+
+  if (c == 0)
+  {
+    struct run *r = (struct run *)pa;
+    memset((void *)pa, 1, PGSIZE);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    move_to_end((void *)pa);
+    numfreepages++;
+  }
+  release(&kmem.lock);
 }
 
 uint64

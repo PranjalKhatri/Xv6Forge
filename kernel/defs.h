@@ -61,6 +61,7 @@ void            kfree(void *);
 void            kinit(void);
 void*           kernel_swapin(int offset);
 uint64          sys_getfreemem(void);
+uint64          pa_to_index(uint64 pa);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);

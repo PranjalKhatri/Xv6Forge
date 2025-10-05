@@ -11,7 +11,7 @@ void move_to_end(void * pa);
 
 void move_to_head_and_set(void * pa,int pid,int va);
 
-void* mru_swapout();
-void* lru_swapout();
+void* mru_swapout(int *refcnt_list);
+void* lru_swapout(int *refcnt_list);
 
 void mru_dump(int n);
