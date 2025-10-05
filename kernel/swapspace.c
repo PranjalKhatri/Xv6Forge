@@ -9,7 +9,7 @@
 #include "swapspace.h"
 #include "config.h"
 
-#define PAGE_META_BLOCKS 3
+#define PAGE_META_BLOCKS 20
 #define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
 
 uint64 mem_block_size;
