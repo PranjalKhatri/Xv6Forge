@@ -42,7 +42,20 @@ pa_to_index(uint64 pa)
 
 void incref(uint64 pa);
 void decref(uint64 pa);
-
+int
+get_refcnt(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || (char *)pa < (char *)kmem.free_mem_start || pa >= PHYSTOP)
+    return -1;
+  uint64 idx = PA_TO_IDX(pa);
+  if (idx >= NUM_PAGES)
+    return -1;
+  int count;
+  acquire(&kmem.lock);
+  count = refcnt[idx];
+  release(&kmem.lock);
+  return count;
+}
 void
 kinit()
 {
