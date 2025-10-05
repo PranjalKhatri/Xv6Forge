@@ -9,6 +9,9 @@
 #include "swapspace.h"
 #include "config.h"
 
+#define PAGE_META_BLOCKS 3
+#define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
+
 uint64 mem_block_size;
 uint64 mem_block_count;
 uint64 bit_map[2 * FSSIZE / (8 * sizeof(uint64))];
@@ -17,16 +20,46 @@ uint64 start_offset;
 
 static struct spinlock swapspace_lock;
 
-extern struct superblock sb;
 void swapspace_init()
 {
     debug("swapspace_init");
     initlock(&swapspace_lock, "swapspace_lock");
     mp_dsz = sizeof(bit_map[0]);
     mem_block_size = BSIZE;
-    start_offset = 2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10; // check the layout in mkfs to get the number
+    start_offset = PAGE_META_BLOCKS+2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10; // check the layout in mkfs to get the number
     mem_block_count = FSSIZE-start_offset;
     DEBUG_PRINT(SWAP_SPACE, "start offset is %ld", start_offset);
+}
+
+// Get the metadata block number and offset within that block
+// for a given page's start_blockno
+// meta_sz: size of metadata structure in bytes
+// Returns 0 on success
+int get_meta_offset(int start_blockno, int *meta_blockno, int *meta_offset, int meta_sz)
+{
+    // Convert absolute block number to relative index
+    int relative_blockno = start_blockno - start_offset;
+    // Each page occupies BLOCKS_PER_PAGE blocks
+    // Calculate which page this is (page index)
+    int page_index = relative_blockno / BLOCKS_PER_PAGE;
+    // Calculate how many metadata entries fit in one block
+    int entries_per_block = BSIZE / meta_sz;
+    // Find which metadata block contains this page's metadata
+    int meta_block_index = page_index / entries_per_block;
+    // Find offset within that metadata block
+    int entry_in_block = page_index % entries_per_block;
+    // Calculate the absolute metadata block number
+    *meta_blockno = start_offset-PAGE_META_BLOCKS + meta_block_index;
+    // Calculate byte offset within the metadata block
+    *meta_offset = entry_in_block * meta_sz;
+    
+    if (meta_block_index >= PAGE_META_BLOCKS) {
+        printf("get_meta_offset: metadata block index %d exceeds PAGE_META_BLOCKS %d\n", 
+               meta_block_index, PAGE_META_BLOCKS);
+        return -1;
+    }
+    
+    return 0;
 }
 
 inline int
