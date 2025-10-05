@@ -389,6 +389,38 @@ err:
   return -1;
 }
 
+// maps parent page table in child and increment refcnts
+int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+
+  for (i = 0; i < sz; i += PGSIZE)
+  {
+    if ((pte = walk(old, i, 0)) == 0)
+      continue; // page table entry hasn't been allocated
+    if ((*pte & PTE_V) == 0)
+      continue; // physical page hasn't been allocated
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    // If page is writable, make it COW in both parent and child
+    if(flags & PTE_W) {
+      flags = (flags & ~PTE_W) | PTE_COW;  
+      *pte = PA2PTE(pa) | flags;  
+    }
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
+      goto err;
+    move_to_head_and_set((void*)pa, child_pid, i);
+    incref(pa);
+  }
+  return 0;
+
+err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
+
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
 void uvmclear(pagetable_t pagetable, uint64 va)
@@ -521,6 +553,52 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
+int
+cowhandler(uint64 va)
+{
+  struct proc *p = myproc();
+  pte_t *pte;
+  uint64 pa;
+  uint flags;
+  char *mem;
+
+  // Round down to page boundary
+  va = PGROUNDDOWN(va,PGSIZE);
+  
+  // Get the PTE
+  if((pte = walk(p->pagetable, va, 0)) == 0)
+    return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
+  if((*pte & PTE_U) == 0)
+    return -1;
+  
+  // Check if it's a COW page
+  if((*pte & PTE_COW) == 0)
+    return -1;
+  
+  pa = PTE2PA(*pte);
+  flags = PTE_FLAGS(*pte);
+  
+  // Check reference count
+  int refcount = get_refcnt(pa);
+  if(refcount < 0)
+    return -1;
+  
+  if(refcount == 1) {
+    // Only reference - just make it writable again
+    *pte = PA2PTE(pa) | ((flags & ~PTE_COW) | PTE_W);
+  } else {
+    if((mem = kalloc()) == 0)
+      return -1;
+    memmove(mem, (char*)pa, PGSIZE);
+    *pte = PA2PTE(mem) | ((flags & ~PTE_COW) | PTE_W);
+    kfree((void*)pa);
+  }
+  
+  return 0;
+}
+
 // allocate and map user memory if process is referencing a page
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
@@ -535,7 +613,16 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   if (va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va, PGSIZE);
-  pte = walk(pagetable, va, 1);
+  pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
+  if (pte && (*pte & PTE_V) && (*pte & PTE_COW)) {
+    if (cowhandler(va) != 0) {
+      return 0;
+    }
+    // COW handled successfully, return the physical address
+    pte = walk(pagetable, va, 0);
+    return PTE2PA(*pte);
+  }
+  pte = walk(pagetable, va, 1);//not a cow fault, can allcoate
   if (pte == 0 || ismapped(pagetable, va))
   {
     return 0;
