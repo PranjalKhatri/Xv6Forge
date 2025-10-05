@@ -61,10 +61,6 @@ void            kfree(void *);
 void            kinit(void);
 void*           kernel_swapin(int offset);
 uint64          sys_getfreemem(void);
-uint64          pa_to_index(uint64 pa);
-void            incref(uint64 pa);
-void            decref(uint64 pa);
-int             get_refcnt(uint64 pa);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -174,6 +170,7 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
+int             cowhandler(pagetable_t,uint64);
 uint64          vmfault(pagetable_t, uint64, int,int);
 
 // plic.c

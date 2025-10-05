@@ -400,19 +400,32 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
   {
     if ((pte = walk(old, i, 0)) == 0)
       continue; // page table entry hasn't been allocated
+
+    if(PTE_IS_SWAPPED(*pte)){
+        pte_t *npte = walk(new,i,1);
+        if(npte == 0)goto err;
+        *npte = *pte;
+        //TODO: swapped refcnts;
+        continue;
+    }
+
     if ((*pte & PTE_V) == 0)
       continue; // physical page hasn't been allocated
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    mru_incref_helper(pa);
+    
     // If page is writable, make it COW in both parent and child
-    if(flags & PTE_W) {
-      flags = (flags & ~PTE_W) | PTE_COW;  
-      *pte = PA2PTE(pa) | flags;  
+    if (flags & PTE_W)
+    {
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+      // CRITICAL: Flush TLB on parent PTE modification
+      sfence_vma();
     }
     if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
       goto err;
-    move_to_head_and_set((void*)pa, child_pid, i);
-    incref(pa);
+    
   }
   return 0;
 
@@ -457,10 +470,26 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     }
 
     pte = walk(pagetable, va0, 0);
-    // forbid copyout over read-only user text pages.
-    if ((*pte & PTE_W) == 0)
+    if (pte == 0)
       return -1;
-
+    // forbid copyout over read-only user text pages.
+    if ((*pte & PTE_W) == 0){
+      if (PTE_IS_COW(*pte)){
+        if (cowhandler(pagetable, va0) < 0){
+          printf("copyout: COW handler failed\n");
+          return -1;
+        }
+        sfence_vma();
+        pa0 = walkaddr(pagetable, va0);
+        if (pa0 == 0){
+          printf("copyout: remap failed after COW\n");
+          return -1;
+        }
+      }else{
+        printf("copyout forbid\n");
+        return -1;
+      }
+    }
     n = PGSIZE - (dstva - va0);
     if (n > len)
       n = len;
@@ -554,19 +583,19 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 }
 
 int
-cowhandler(uint64 va)
+cowhandler(pagetable_t pagetable,uint64 va)
 {
-  struct proc *p = myproc();
   pte_t *pte;
   uint64 pa;
   uint flags;
   char *mem;
-
+  if(va >= MAXVA)
+    return -1;
   // Round down to page boundary
   va = PGROUNDDOWN(va,PGSIZE);
   
   // Get the PTE
-  if((pte = walk(p->pagetable, va, 0)) == 0)
+  if((pte = walk(pagetable, va, 0)) == 0)
     return -1;
   if((*pte & PTE_V) == 0)
     return -1;
@@ -614,8 +643,8 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
     return 0;
   va = PGROUNDDOWN(va, PGSIZE);
   pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
-  if (pte && (*pte & PTE_V) && (*pte & PTE_COW)) {
-    if (cowhandler(va) != 0) {
+  if (pte && PTE_IS_COW(*pte)) {
+    if (cowhandler(pagetable,va) != 0) {
       return 0;
     }
     // COW handled successfully, return the physical address
@@ -642,7 +671,6 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
       return 0;
     memset((void *)mem, 0, PGSIZE);
   }
-  move_to_head_and_set((void *)mem, p->pid, va);
   int perm = PTE_U;
   if (instruction)
   {
@@ -661,6 +689,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
     kfree((void *)mem);
     return 0;
   }
+  move_to_head_and_set((void *)mem, p->pid, va);
   return mem;
 }
 
