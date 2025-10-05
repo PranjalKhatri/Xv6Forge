@@ -372,6 +372,7 @@ typedef uint64 *pagetable_t; // 512 PTEs
 
 #define PTE_FLAGS(pte) ((pte) & 0x3FF)
 
+#define PTE_IS_COW(pte) (((pte) & PTE_V) && ((pte) & PTE_COW) && !((pte) & PTE_W))
 // Checks if a PTE is for a swapped-out page.
 // It is swapped if the Valid bit is 0 and our Swapped bit is 1.
 #define PTE_IS_SWAPPED(pte) (((pte) & PTE_V) == 0 && ((pte) & PTE_S) != 0)
