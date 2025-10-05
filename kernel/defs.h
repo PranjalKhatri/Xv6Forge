@@ -62,6 +62,9 @@ void            kinit(void);
 void*           kernel_swapin(int offset);
 uint64          sys_getfreemem(void);
 uint64          pa_to_index(uint64 pa);
+void            incref(uint64 pa);
+void            decref(uint64 pa);
+int             get_refcnt(uint64 pa);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);
@@ -161,6 +164,7 @@ pagetable_t     uvmcreate(void);
 uint64          uvmalloc(pagetable_t, uint64, uint64, int);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64,int);
+int             cowuvmcopy(pagetable_t, pagetable_t, uint64,int);
 void            uvmfree(pagetable_t, uint64);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
