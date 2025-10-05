@@ -34,6 +34,7 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
         map[j]->pid = -1;
         map[j]->pa = pa;
         map[j]->va = 0;
+        map[j]->ref_cnt=0;
         map[j]->prev = map[j]->next = 0;
         if (j != 0)
         {
@@ -43,7 +44,7 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     }
     head = map[0];
     end = map[num_pages - req_pages - 1];
-
+    printf("mru init done with req pages : %d\n",req_pages);
     debug("mru init end\n");
     return (char *)PGROUNDUP((uint64)pa_start,PGSIZE) + req_pages * PGSIZE;
 }
@@ -56,6 +57,8 @@ int PA2IDX(void *pa)
 }
 void map_neighbors(int idx)
 {
+    if (mru_map[idx] == 0)
+        return; 
     if (mru_map[idx]->prev)
         mru_map[idx]->prev->next = mru_map[idx]->next;
     if (mru_map[idx]->next)
@@ -112,10 +115,8 @@ void move_to_head_and_set(void *pa, int pid, int va)
     release(&mru_lock);
 }
 
-// In kernel/mru.c
-
 void *
-mru_swapout(int* refcnt_list)
+mru_swapout()
 {
     void *victim_pa;
     int victim_pid;
@@ -132,25 +133,27 @@ mru_swapout(int* refcnt_list)
     victim_pid = head->pid;
     victim_va = head->va;
     release(&mru_lock);
-    uint64 idx = pa_to_index((uint64)victim_pa);
-    offset = swap_out(victim_pa, victim_pid, victim_va,refcnt_list[idx]);
+    uint64 idx = PA2IDX(victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va,mru_map[idx]->ref_cnt);
     if (offset < 0)
     {
         return 0;
     }
 
-    acquire(&mru_lock);
     victim_proc = find_proc(victim_pid);
     if (victim_proc)
     {
         pte_t *victim_ptep = walk(victim_proc->pagetable, victim_va, 0);
         // Ensure the PTE still exists and belongs to the page we swapped out
+        acquire(&mru_lock);
         if (victim_ptep && (*victim_ptep & PTE_V) && PTE2PA(*victim_ptep) == (uint64)victim_pa)
         {
             *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
             victim_proc->pst.num_swap_outs++;
         }
+        release(&mru_lock);
     }
+    acquire(&mru_lock);
     __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
     release(&mru_lock);
 
@@ -180,7 +183,7 @@ void quarantine_reserved_pages(void)
 }
 
 void *
-lru_swapout(int* refcnt_list)
+lru_swapout()
 {
     static int cnt;
     void *victim_pa = 0;
@@ -226,8 +229,8 @@ lru_swapout(int* refcnt_list)
 
     // debug("lru swapout: \n");
     // debug("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
-    uint64 idx = pa_to_index((uint64)victim_pa);
-    offset = swap_out(victim_pa, victim_pid, victim_va,refcnt_list[idx]);
+    uint64 idx = PA2IDX(victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va,mru_map[idx]->ref_cnt);
     if (offset < 0)
     {
         // debug("lru swapout : swapout failed\n");
@@ -282,4 +285,76 @@ void mru_dump(int n)
         }
     
     }
+}
+
+// Returns the new reference count.
+int mru_incref_helper(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0)
+    panic("mru_incref_helper: not aligned");
+
+  uint64 idx = PA2IDX((void*)pa);
+  int count;
+
+  acquire(&mru_lock);
+  if (idx >= NUM_PAGES) {
+    release(&mru_lock);
+    panic("mru_incref_helper: index out of bounds");
+  }
+  
+  if (mru_map[idx]->ref_cnt < 0) {
+      release(&mru_lock);
+      panic("mru_incref_helper: negative ref count");
+  }
+  
+  count = ++mru_map[idx]->ref_cnt;
+  release(&mru_lock);
+  
+  return count;
+}
+
+
+// Returns 1 if ref_cnt is 0 (page is ready to be returned to freelist), 0 otherwise.
+int mru_decref_helper(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0)
+    panic("mru_decref_helper: invalid pa");
+
+  uint64 idx = PA2IDX((void*)pa);
+  int c;
+  int is_free = 0;
+
+  acquire(&mru_lock);
+  if (idx >= NUM_PAGES || mru_map[idx]->ref_cnt < 1) {
+    release(&mru_lock);
+    panic("mru_decref_helper: index out of bounds or already zero");
+  }
+
+  c = --mru_map[idx]->ref_cnt;
+
+  if (c == 0)
+  {
+    mru_map[idx]->pid = -1; 
+    mru_map[idx]->va = 0;
+    __move_to_end_unlocked((void*)pa);
+    is_free = 1;
+  }
+  
+  release(&mru_lock);
+  
+  return is_free;
+}
+int
+get_refcnt(uint64 pa)
+{
+  if (((uint64)pa % PGSIZE) != 0 || pa >= PHYSTOP)
+    return -1;
+  uint64 idx = PA2IDX((void*)pa);
+  if (idx >= NUM_PAGES)
+    return -1;
+  int count;
+  acquire(&mru_lock);
+  count = mru_map[idx]->ref_cnt;
+  release(&mru_lock);
+  return count;
 }
