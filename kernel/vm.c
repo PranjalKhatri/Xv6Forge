@@ -413,7 +413,6 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
       continue; // physical page hasn't been allocated
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    mru_incref_helper(pa);
     
     // If page is writable, make it COW in both parent and child
     if (flags & PTE_W)
@@ -425,7 +424,7 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
     }
     if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
       goto err;
-    
+    mru_incref_helper(pa);
   }
   return 0;
 
