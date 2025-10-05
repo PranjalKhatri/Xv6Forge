@@ -535,7 +535,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   if (va >= p->sz)
     return 0;
   va = PGROUNDDOWN(va, PGSIZE);
-  pte = walk(pagetable, va, 0);
+  pte = walk(pagetable, va, 1);
   if (pte == 0 || ismapped(pagetable, va))
   {
     return 0;
