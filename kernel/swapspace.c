@@ -24,8 +24,8 @@ void swapspace_init()
     initlock(&swapspace_lock, "swapspace_lock");
     mp_dsz = sizeof(bit_map[0]);
     mem_block_size = BSIZE;
-    mem_block_count = FSSIZE;
     start_offset = 2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10; // check the layout in mkfs to get the number
+    mem_block_count = FSSIZE-start_offset;
     DEBUG_PRINT(SWAP_SPACE, "start offset is %ld", start_offset);
 }
 
