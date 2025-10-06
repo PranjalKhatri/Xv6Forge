@@ -160,7 +160,6 @@ kerneltrap()
   // give up the CPU if this is a timer interrupt.
   struct proc*p=myproc();
   if(which_dev == 2 && p != 0){
-    debug("timer inter!\n");
     acquire(&p->lock);
     p->cputicks++;
     release(&p->lock);
