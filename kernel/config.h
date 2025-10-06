@@ -6,10 +6,10 @@
 #define DEBUG_RELOC 0
 #endif
 
-#ifndef SWAP_SPACE
-#define SWAP_SPACE 0
+#ifndef DEBUG_SWAP_SPACE
+#define DEBUG_SWAP_SPACE 0
 #endif
 
-#ifndef COW_SWAP_ENABLED
-#define COW_SWAP_ENABLED 0
+#ifndef DEBUG_COW_SWAP_ENABLED
+#define DEBUG_COW_SWAP_ENABLED 0
 #endif
