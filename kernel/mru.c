@@ -109,12 +109,25 @@ void move_to_head(void *pa)
     head = mru_map[idx];
 }
 
-void move_to_head_and_set(void *pa, int pid, int va)
+void move_to_head_and_set(void *pa, int pid, uint64 va)
 {
+    if(va >= MAXVA){
+        panic("invalid va in move to head and set\n");
+    }
     acquire(&mru_lock);
     move_to_head(pa);
     head->pid = pid;
     head->va = va;
+    release(&mru_lock);
+}
+
+void set_only(void *pa, int pid, uint64 va,int refs)
+{
+    acquire(&mru_lock);
+    int idx = PA2IDX(pa);
+    mru_map[idx]->pid = pid;
+    mru_map[idx]->va = va;   
+    mru_map[idx]->ref_cnt = refs;
     release(&mru_lock);
 }
 
@@ -139,7 +152,10 @@ mru_swapout()
     victim_refcnt = node->ref_cnt;
     while(node && node != end){
         //dont swap trampoline and trapfram
-        if(node->va >= TRAPFRAME && node->va < MAXVA);
+        if(node->va >= TRAPFRAME && node->va < MAXVA){
+            node = node->next;
+            continue;
+        }
         else if( COW_SWAP_ENABLED || node->ref_cnt == 1){
             victim_pa = node->pa;
             victim_pid = node->pid;
@@ -233,7 +249,10 @@ lru_swapout()
     do
     {
         //dont swap trampoline and trapfram
-        if(cand->va >= TRAPFRAME && cand->va < MAXVA);
+        if(cand->va >= TRAPFRAME && cand->va < MAXVA){
+            cur = cur->prev;
+            continue;
+        }
         else if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
         { // eligible user-mapped page
             cand = cur;
@@ -301,7 +320,7 @@ void mru_dump(int n)
     {
         while (i < n && tmp)
         {
-            printf("PID: %d  | VA: %d  | PA: %p \n", tmp->pid, tmp->va, tmp->pa);
+            printf("PID: %d  | VA: %ld  | PA: %p \n", tmp->pid, tmp->va, tmp->pa);
             tmp = tmp->next;
             i++;
         }
@@ -311,7 +330,7 @@ void mru_dump(int n)
         tmp = end;
         while (i < n && tmp)
         {
-            printf("PID: %d  | VA: %d  | PA: %p \n", tmp->pid, tmp->va, tmp->pa);
+            printf("PID: %d  | VA: %ld  | PA: %p \n", tmp->pid, tmp->va, tmp->pa);
             tmp = tmp->prev;
             i++;
         }
