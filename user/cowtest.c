@@ -2,6 +2,18 @@
 #include "kernel/stat.h"
 #include "user/user.h"
 
+struct pagestat {
+  int num_page_faults;
+  int num_swap_ins;
+  int num_swap_outs;
+};
+struct pagestat stats;
+
+void print_stats(const char* event, struct pagestat* stats) {
+  printf("%s: Faults=%d, SwapOuts=%d, SwapIns=%d\n", 
+         event, stats->num_page_faults, stats->num_swap_outs, stats->num_swap_ins);
+}
+
 // cowtest: a simple program to test copy-on-write fork.
 int
 main(void)
@@ -35,6 +47,11 @@ main(void)
     printf("Child (pid %d): Write successful. The new value is '%c'\n", getpid(), *mem);
 
     printf("Child (pid %d): Exiting.\n", getpid());
+    
+    printf("child page stats\n");
+    getpagestat(getpid(),&stats);
+    print_stats("", &stats);
+    
     exit(0);
   } else {
     // --- Parent Process ---
