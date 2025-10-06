@@ -102,7 +102,7 @@ kalloc(void)
     release(&kmem.lock);
     if (mru_incref_helper((uint64)r) != 1)
     {
-      debug("kalloc: refcnt not returned 1\n");
+      panic("kalloc: refcnt not returned 1\n");
       kfree(r);
       return 0;
     }
@@ -121,7 +121,10 @@ kalloc(void)
   else 
     r = (struct run*)lru_swapout();
   if(r) {
-    mru_set_refcnt((uint64)r,1);
+    if(mru_incref_helper((uint64)r) != 1){
+      panic("swapout page refcnt is not 1 after incrementing\n");
+    }
+    // mru_set_refcnt((uint64)r,1);
     memset((char*)r, 5, PGSIZE);
   }
 
@@ -144,7 +147,6 @@ void* kernel_swapin(int offset){
   acquire(&kmem.lock);
   if (stored_refcnt < 1) panic("kernel_swapin: Retrieved refcnt is less than 1");
   mru_set_refcnt((uint64)pa, stored_refcnt);
-  // page_to_mru_map[PA2IDX(pa)]->ref_cnt=stored_refcnt;
   release(&kmem.lock);
   return pa;
 }
