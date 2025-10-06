@@ -39,7 +39,7 @@ void swapspace_init()
     if (required_bitmap_size > actual_bitmap_size) {
         panic("bit_map array too small!");
     }
-    DEBUG_PRINT(DEBUG_SWAP_SPACE, "start offset is %ld", start_offset);
+    DEBUG_PRINT(DEBUG_SWAP_SPACE, "start offset is %ld\n", start_offset);
 }
 
 // Get the metadata block number and offset within that block

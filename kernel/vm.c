@@ -260,6 +260,7 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if ((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
       continue;
     if(PTE_IS_SWAPPED(*pte)){
+      debug("swapped pte in uvmunmap\n");
       if(do_free) {
         uint64 pa = vmfault(pagetable, a, 0, *pte & PTE_X);
         if(pa == 0) {
@@ -419,7 +420,7 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
       continue; // page table entry hasn't been allocated
 
     if(PTE_IS_SWAPPED(*pte)){
-      if(!COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled");
+      if(!DEBUG_COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled");
         pte_t *npte = walk(new,i,1);
         if(npte == 0)goto err;
         *npte = *pte;
