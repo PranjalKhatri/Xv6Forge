@@ -13,22 +13,33 @@
 
 uint64 mem_block_size;
 uint64 mem_block_count;
-uint64 bit_map[2 * FSSIZE / (8 * sizeof(uint64))];
+uint64 bit_map[2 * SWAP_BLOCKS / (8 * sizeof(uint64))];
 int mp_dsz;
 uint64 start_offset;
-
+int net_allocated;
 static struct spinlock swapspace_lock;
 
 void swapspace_init()
 {
-    debug("swapspace_init");
+    debug("swapspace_ini\nt");
     initlock(&swapspace_lock, "swapspace_lock");
-    mp_dsz = sizeof(bit_map[0]);
+    mp_dsz = sizeof(bit_map[0])*8;
     mem_block_size = BSIZE;
+    net_allocated=0;
     // start_offset = PAGE_META_BLOCKS+2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10+100; // check the layout in mkfs to get the number
     start_offset = FSSIZE+PAGE_META_BLOCKS; // check the layout in mkfs to get the number
-    mem_block_count = SWAP_BLOCKS;
-    DEBUG_PRINT(SWAP_SPACE, "start offset is %ld", start_offset);
+    mem_block_count = SWAP_BLOCKS-PAGE_META_BLOCKS;
+    
+    uint64 required_bitmap_size = (mem_block_count + mp_dsz - 1) / mp_dsz;
+    uint64 actual_bitmap_size = sizeof(bit_map) / sizeof(bit_map[0]);
+
+    printf("Bitmap check: need %ld entries, have %ld entries\n", 
+           required_bitmap_size, actual_bitmap_size);
+    
+    if (required_bitmap_size > actual_bitmap_size) {
+        panic("bit_map array too small!");
+    }
+    DEBUG_PRINT(DEBUG_SWAP_SPACE, "start offset is %ld", start_offset);
 }
 
 // Get the metadata block number and offset within that block
@@ -65,21 +76,21 @@ int get_meta_offset(int start_blockno, int *meta_blockno, int *meta_offset, int 
 inline int
 is_allocated(uint64 idx)
 {
-    return (bit_map[idx / mp_dsz] & (1 << (idx % mp_dsz))) != 0;
+    return (bit_map[idx / mp_dsz] & (1uLL << (idx % mp_dsz))) != 0;
 }
 
 inline void
 set_bit_map(uint64 idx)
 {
+    net_allocated++;
     bit_map[idx / mp_dsz] |= 1ull << (idx % mp_dsz);
 }
 
 inline void
 clear_bit_map(uint64 idx)
 {
-    uint64 word = idx / 64;
-    uint64 bit = idx % 64;
-    bit_map[word] &= ~(1ULL << bit);
+    net_allocated--;
+    bit_map[idx / mp_dsz] &= ~(1ULL << (idx % mp_dsz));
 }
 // Allocate 'block_count' contiguous free blocks
 // Returns starting block index, or -1 if not enough space
@@ -99,8 +110,9 @@ int allocate_block(int block_count)
             {
                 for (int j = start; j < start + block_count; j++)
                     set_bit_map(j);
+                DEBUG_PRINT(DEBUG_SWAP_SPACE,"net allocated %d\n",net_allocated);
                 release(&swapspace_lock);
-                DEBUG_PRINT(SWAP_SPACE,"allocated start block %ld\n",start+start_offset);
+                DEBUG_PRINT(DEBUG_SWAP_SPACE,"allocated start block %ld\n",start+start_offset);
                 return start_offset + start;
             }
         }
@@ -119,9 +131,10 @@ int allocate_block(int block_count)
 void free_block(int start_block, int block_count)
 {
     start_block -= start_offset;
-    DEBUG_PRINT(SWAP_SPACE,"freed %d till %d\n",start_block,start_block+block_count-1);
+    DEBUG_PRINT(DEBUG_SWAP_SPACE,"freed %d till %d\n",start_block,start_block+block_count-1);
     acquire(&swapspace_lock);
     for (int i = start_block; i < start_block + block_count; i++)
         clear_bit_map(i);
+    DEBUG_PRINT(DEBUG_SWAP_SPACE,"net allocated %d\n",net_allocated);
     release(&swapspace_lock);
 }
