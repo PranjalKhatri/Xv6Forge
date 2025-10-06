@@ -264,15 +264,17 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       if(do_free) {
         uint64 pa = vmfault(pagetable, a, 0, *pte & PTE_X);
         if(pa == 0) {
-          int offset = PTE_SWAP_GET_OFFSET(*pte);
-          swap_free(offset);
+          // some error in vmfault
+          printf("uvmunmap swapfree!\n");
           *pte = 0;
           continue;
+        }else {
+          kfree((void*)pa);
+          debug("freed a swap page after faulting");
         }
-      } else {
-        *pte = 0;
-        continue;
       }
+      *pte = 0;
+      continue;
     }
     if ((*pte & PTE_V) == 0) // has physical page been allocated?
       continue;
@@ -420,7 +422,8 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
       continue; // page table entry hasn't been allocated
 
     if(PTE_IS_SWAPPED(*pte)){
-      if(!DEBUG_COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled");
+      debug("in cow swap\n");
+      if(!COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled");
         pte_t *npte = walk(new,i,1);
         if(npte == 0)goto err;
         *npte = *pte;
@@ -444,7 +447,8 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
     if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
       goto err;
     mru_incref_helper(pa);
-    move_to_head_and_set((void*)pa,myproc()->pid,i);
+    move_to_head_and_set((void*)pa,child_pid,i);
+    sfence_vma();
   }
   return 0;
 
@@ -675,11 +679,13 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   pte_t *pte;
   struct proc *p = myproc();
   p->pst.num_page_faults++;
-  if (va >= MAXVA || va >= p->sz)
-    return 0;
-  
   va = PGROUNDDOWN(va, PGSIZE);
-
+  if (va == TRAPFRAME || va == TRAMPOLINE){
+    goto vm_swap;
+  }  else if (va >= MAXVA || va >= p->sz){
+    printf("va : %ld p-> %ld\n",va,p->sz);
+    return 0;
+  }
   pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
   if (pte && PTE_IS_COW(*pte)) {
     if (cowhandler(pagetable,va) != 0) {
@@ -691,6 +697,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
     return PTE2PA(*pte);
   }
 
+  vm_swap:
   pte = walk(pagetable, va, 1);//not a cow fault, can allcoate
   if (pte == 0 || ismapped(pagetable, va)){
     debug("already mapped/pte is 0 pte: %p",pte);
@@ -699,8 +706,10 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   if (PTE_IS_SWAPPED(*pte)) {
     if(swaphandler(pagetable,pte,va,&mem) == 0)
       p->pst.num_swap_ins++;
-    else
+    else{
+      printf("swap handler failed\n");
       return 0;
+    }
   }
   else{
     mem = (uint64)kalloc();
