@@ -138,7 +138,9 @@ mru_swapout()
     victim_va = node->va;
     victim_refcnt = node->ref_cnt;
     while(node && node != end){
-        if( COW_SWAP_ENABLED || node->ref_cnt == 1){
+        //dont swap trampoline and trapfram
+        if(node->va >= TRAPFRAME && node->va < MAXVA);
+        else if( COW_SWAP_ENABLED || node->ref_cnt == 1){
             victim_pa = node->pa;
             victim_pid = node->pid;
             victim_va = node->va;
@@ -230,7 +232,9 @@ lru_swapout()
     struct mru_node *cand = 0;
     do
     {
-        if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
+        //dont swap trampoline and trapfram
+        if(cand->va >= TRAPFRAME && cand->va < MAXVA);
+        else if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
         { // eligible user-mapped page
             cand = cur;
             break;
