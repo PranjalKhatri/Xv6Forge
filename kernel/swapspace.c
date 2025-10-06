@@ -9,7 +9,6 @@
 #include "swapspace.h"
 #include "config.h"
 
-#define PAGE_META_BLOCKS 20
 #define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
 
 uint64 mem_block_size;
@@ -26,8 +25,9 @@ void swapspace_init()
     initlock(&swapspace_lock, "swapspace_lock");
     mp_dsz = sizeof(bit_map[0]);
     mem_block_size = BSIZE;
-    start_offset = PAGE_META_BLOCKS+2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10; // check the layout in mkfs to get the number
-    mem_block_count = FSSIZE-start_offset;
+    // start_offset = PAGE_META_BLOCKS+2+LOGBLOCKS+1 + FSSIZE / BPB + 4*NINODE/IPB+1 + 10+100; // check the layout in mkfs to get the number
+    start_offset = FSSIZE+PAGE_META_BLOCKS; // check the layout in mkfs to get the number
+    mem_block_count = SWAP_BLOCKS;
     DEBUG_PRINT(SWAP_SPACE, "start offset is %ld", start_offset);
 }
 

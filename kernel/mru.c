@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "mru.h"
 #include "swapfile.h"
+#include "config.h"
 
 int req_pages;
 int mru_map_len;
@@ -51,8 +52,10 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
 int PA2IDX(void *pa)
 {
     int idx = (int)((char *)pa - map_start) / PGSIZE;
-    if (idx >= mru_map_len || idx < 0)
+    if (idx >= mru_map_len || idx < 0){
+        debug("idx: %d",idx);
         panic("PA2IDX");
+    }
     return idx;
 }
 void map_neighbors(int idx)
@@ -129,9 +132,19 @@ mru_swapout()
         release(&mru_lock);
         return 0;
     }
-    victim_pa = head->pa;
-    victim_pid = head->pid;
-    victim_va = head->va;
+    struct mru_node* node=head;
+    victim_pa = node->pa;
+    victim_pid = node->pid;
+    victim_va = node->va;
+    while(node && node != end){
+        if( COW_SWAP_ENABLED || node->ref_cnt == 1){
+            victim_pa = node->pa;
+            victim_pid = node->pid;
+            victim_va = node->va;
+            break;
+        }
+        node = node->next;
+    }
     release(&mru_lock);
     uint64 idx = PA2IDX(victim_pa);
     offset = swap_out(victim_pa, victim_pid, victim_va,mru_map[idx]->ref_cnt);
@@ -155,6 +168,7 @@ mru_swapout()
     }
     acquire(&mru_lock);
     __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
+    mru_map[PA2IDX(victim_pa)]->ref_cnt=0;
     release(&mru_lock);
 
     return victim_pa;
@@ -209,7 +223,7 @@ lru_swapout()
     struct mru_node *cand = 0;
     do
     {
-        if (cur->pid >= 3)
+        if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
         { // eligible user-mapped page
             cand = cur;
             break;
@@ -250,6 +264,7 @@ lru_swapout()
         }
         // debug("updated ptes\n");
     }
+    mru_map[PA2IDX(victim_pa)]->ref_cnt=0;
     __move_to_end_unlocked(victim_pa);
     release(&mru_lock);
 
@@ -326,7 +341,7 @@ int mru_decref_helper(uint64 pa)
 
   acquire(&mru_lock);
   if (idx >= NUM_PAGES || mru_map[idx]->ref_cnt < 1) {
-    release(&mru_lock);
+    printf("idx: %ld, refcnt: %d\n",idx,mru_map[idx]->ref_cnt);
     panic("mru_decref_helper: index out of bounds or already zero");
   }
 
@@ -343,6 +358,30 @@ int mru_decref_helper(uint64 pa)
   release(&mru_lock);
   
   return is_free;
+}
+void 
+mru_set_refcnt(uint64 pa, int refcnt)
+{
+  if (((uint64)pa % PGSIZE) != 0)
+    panic("mru_set_refcnt: not aligned");
+
+  uint64 idx = PA2IDX((void*)pa);
+
+  acquire(&mru_lock);
+  
+  if (idx >= NUM_PAGES) {
+    release(&mru_lock);
+    panic("mru_set_refcnt: index out of bounds");
+  }
+  
+  if (refcnt < 0) {
+    release(&mru_lock);
+    panic("mru_set_refcnt: negative ref count");
+  }
+  
+  mru_map[idx]->ref_cnt = refcnt;
+  
+  release(&mru_lock);
 }
 int
 get_refcnt(uint64 pa)

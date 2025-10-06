@@ -102,6 +102,7 @@ kalloc(void)
     release(&kmem.lock);
     if (mru_incref_helper((uint64)r) != 1)
     {
+      debug("kalloc: refcnt not returned 1\n");
       kfree(r);
       return 0;
     }
@@ -120,10 +121,7 @@ kalloc(void)
   else 
     r = (struct run*)lru_swapout();
   if(r) {
-    if (mru_incref_helper((uint64)r) != 1) {
-        kfree(r); 
-        return 0;
-    }
+    mru_set_refcnt((uint64)r,1);
     memset((char*)r, 5, PGSIZE);
   }
 
@@ -132,8 +130,10 @@ kalloc(void)
 
 void* kernel_swapin(int offset){
   void* pa = kalloc();
-  if(pa == 0)
-    return 0; 
+  if(pa == 0){
+    debug("kernel swapin out of memory\n");
+    return 0;
+  } 
   int pid_dummy;
   uint64 va_dummy;
   int stored_refcnt;
@@ -143,7 +143,8 @@ void* kernel_swapin(int offset){
   }
   acquire(&kmem.lock);
   if (stored_refcnt < 1) panic("kernel_swapin: Retrieved refcnt is less than 1");
-  page_to_mru_map[PA2IDX(pa)]->ref_cnt=stored_refcnt;
+  mru_set_refcnt((uint64)pa, stored_refcnt);
+  // page_to_mru_map[PA2IDX(pa)]->ref_cnt=stored_refcnt;
   release(&kmem.lock);
   return pa;
 }

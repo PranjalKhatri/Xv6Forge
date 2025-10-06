@@ -9,3 +9,7 @@
 #ifndef SWAP_SPACE
 #define SWAP_SPACE 0
 #endif
+
+#ifndef COW_SWAP_ENABLED
+#define COW_SWAP_ENABLED 0
+#endif
