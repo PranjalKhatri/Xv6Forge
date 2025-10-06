@@ -137,13 +137,16 @@ mru_swapout()
     victim_pid = node->pid;
     victim_va = node->va;
     while(node && node != end){
-        if( COW_SWAP_ENABLED || node->ref_cnt == 1){
+        if( DEBUG_COW_SWAP_ENABLED || node->ref_cnt == 1){
             victim_pa = node->pa;
             victim_pid = node->pid;
             victim_va = node->va;
             break;
         }
         node = node->next;
+    }
+    if( !DEBUG_COW_SWAP_ENABLED && node->ref_cnt > 1){
+        panic("mru_swapout: no victim with refcnt 1 found");
     }
     release(&mru_lock);
     uint64 idx = PA2IDX(victim_pa);
@@ -223,7 +226,7 @@ lru_swapout()
     struct mru_node *cand = 0;
     do
     {
-        if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
+        if ( (DEBUG_COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
         { // eligible user-mapped page
             cand = cur;
             break;
@@ -235,6 +238,9 @@ lru_swapout()
     {
         release(&mru_lock);
         return 0;
+    }
+    if( !DEBUG_COW_SWAP_ENABLED && cand->ref_cnt > 1){
+        panic("lru_swapout: no victim with refcnt 1 found");
     }
     victim_pa = cand->pa;
     victim_pid = cand->pid;
