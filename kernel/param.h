@@ -14,4 +14,4 @@
 #define USERSTACK    1     // user stack pages
 #define PROC_NAME_SZ 16
 #define SWAP_BLOCKS 2000
-#define PAGE_META_BLOCKS 20
+#define PAGE_META_BLOCKS 51 //TODO change based on SWAP_BLOCKS
