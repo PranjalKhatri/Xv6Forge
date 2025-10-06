@@ -10,6 +10,6 @@
 #define DEBUG_SWAP_SPACE 0
 #endif
 
-#ifndef DEBUG_COW_SWAP_ENABLED
-#define DEBUG_COW_SWAP_ENABLED 0
+#ifndef COW_SWAP_ENABLED
+#define COW_SWAP_ENABLED 0
 #endif
