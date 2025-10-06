@@ -171,6 +171,7 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 int             cowhandler(pagetable_t,uint64);
+int             swaphandler(pagetable_t, pte_t*, uint64, uint64*);
 uint64          vmfault(pagetable_t, uint64, int,int);
 
 // plic.c
