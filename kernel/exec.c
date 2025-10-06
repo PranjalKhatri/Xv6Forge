@@ -305,15 +305,15 @@ int kexec(char *path, char **argv)
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
+  proc_freepagetable(oldpagetable, oldsz);
   p->sz = sz;
   p->trapframe->epc = elf.entry; // initial program counter = ulib.c:start()
   p->trapframe->sp = sp;         // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
   return argc; // this ends up in a0, the first argument to main(argc, argv)
-
-bad:
+  
+  bad:
   if (pagetable)
-    proc_freepagetable(pagetable, sz);
+   proc_freepagetable(pagetable, sz);
   if (ip)
   {
     iunlockput(ip);
