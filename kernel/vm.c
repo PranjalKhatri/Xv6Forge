@@ -270,7 +270,7 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
           continue;
         }else {
           kfree((void*)pa);
-          debug("freed a swap page after faulting");
+          debug("freed a swap page after faulting\n");
         }
       }
       *pte = 0;
@@ -423,7 +423,7 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
 
     if(PTE_IS_SWAPPED(*pte)){
       debug("in cow swap\n");
-      if(!COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled");
+      if(!COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled\n");
         pte_t *npte = walk(new,i,1);
         if(npte == 0)goto err;
         *npte = *pte;
@@ -680,13 +680,14 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
   struct proc *p = myproc();
   p->pst.num_page_faults++;
   va = PGROUNDDOWN(va, PGSIZE);
-  if (va == TRAPFRAME || va == TRAMPOLINE){
-    goto vm_swap;
-  }  else if (va >= MAXVA || va >= p->sz){
-    printf("va : %ld p-> %ld\n",va,p->sz);
-    return 0;
-  }
   pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
+  // if (va >= MAXVA || va >= p->sz){
+  //   if(PTE_IS_SWAPPED(*pte)){
+  //     printf("swapped pte in vmfault!!\n");
+  //   }
+  //   printf("va : %ld p-> %ld\n",va,p->sz);
+  //   return 0;
+  // }
   if (pte && PTE_IS_COW(*pte)) {
     if (cowhandler(pagetable,va) != 0) {
       debug("cowhandler returned non zero\n");
@@ -697,7 +698,6 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
     return PTE2PA(*pte);
   }
 
-  vm_swap:
   pte = walk(pagetable, va, 1);//not a cow fault, can allcoate
   if (pte == 0 || ismapped(pagetable, va)){
     debug("already mapped/pte is 0 pte: %p",pte);
