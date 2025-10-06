@@ -33,7 +33,7 @@ void swapspace_init()
     uint64 required_bitmap_size = (mem_block_count + mp_dsz - 1) / mp_dsz;
     uint64 actual_bitmap_size = sizeof(bit_map) / sizeof(bit_map[0]);
 
-    printf("Bitmap check: need %ld entries, have %ld entries\n", 
+    DEBUG_PRINT(DEBUG_SWAP_SPACE,"Bitmap check: need %ld entries, have %ld entries\n", 
            required_bitmap_size, actual_bitmap_size);
     
     if (required_bitmap_size > actual_bitmap_size) {
