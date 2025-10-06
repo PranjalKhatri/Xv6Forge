@@ -45,7 +45,7 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     }
     head = map[0];
     end = map[num_pages - req_pages - 1];
-    printf("mru init done with req pages : %d\n",req_pages);
+    debug("mru init done with req pages : %d\n",req_pages);
     debug("mru init end\n");
     return (char *)PGROUNDUP((uint64)pa_start,PGSIZE) + req_pages * PGSIZE;
 }
@@ -122,7 +122,7 @@ void *
 mru_swapout()
 {
     void *victim_pa;
-    int victim_pid;
+    int victim_pid,victim_refcnt;
     uint64 victim_va;
     struct proc *victim_proc;
     int offset;
@@ -136,26 +136,27 @@ mru_swapout()
     victim_pa = node->pa;
     victim_pid = node->pid;
     victim_va = node->va;
+    victim_refcnt = node->ref_cnt;
     while(node && node != end){
-        if( DEBUG_COW_SWAP_ENABLED || node->ref_cnt == 1){
+        if( COW_SWAP_ENABLED || node->ref_cnt == 1){
             victim_pa = node->pa;
             victim_pid = node->pid;
             victim_va = node->va;
+            victim_refcnt = node->ref_cnt;
             break;
         }
         node = node->next;
     }
-    if( !DEBUG_COW_SWAP_ENABLED && node->ref_cnt > 1){
+    if( !COW_SWAP_ENABLED && node->ref_cnt > 1){
         panic("mru_swapout: no victim with refcnt 1 found");
     }
     release(&mru_lock);
-    uint64 idx = PA2IDX(victim_pa);
-    offset = swap_out(victim_pa, victim_pid, victim_va,mru_map[idx]->ref_cnt);
+    offset = swap_out(victim_pa, victim_pid, victim_va,victim_refcnt);
     if (offset < 0)
     {
         return 0;
     }
-
+    
     victim_proc = find_proc(victim_pid);
     if (victim_proc)
     {
@@ -171,7 +172,10 @@ mru_swapout()
     }
     acquire(&mru_lock);
     __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
-    mru_map[PA2IDX(victim_pa)]->ref_cnt=0;
+    uint64 idx = PA2IDX(victim_pa);
+    mru_map[idx]->pid = -1;
+    mru_map[idx]->va = 0;
+    mru_map[idx]->ref_cnt=0;
     release(&mru_lock);
 
     return victim_pa;
@@ -204,7 +208,7 @@ lru_swapout()
 {
     static int cnt;
     void *victim_pa = 0;
-    int victim_pid = -1;
+    int victim_pid = -1,victim_refcnt;
     uint64 victim_va = 0;
     struct proc *victim_proc;
     int offset;
@@ -226,7 +230,7 @@ lru_swapout()
     struct mru_node *cand = 0;
     do
     {
-        if ( (DEBUG_COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
+        if ( (COW_SWAP_ENABLED || cur->ref_cnt == 1) && cur->pid >= 3)
         { // eligible user-mapped page
             cand = cur;
             break;
@@ -239,18 +243,19 @@ lru_swapout()
         release(&mru_lock);
         return 0;
     }
-    if( !DEBUG_COW_SWAP_ENABLED && cand->ref_cnt > 1){
+    if( !COW_SWAP_ENABLED && cand->ref_cnt > 1){
         panic("lru_swapout: no victim with refcnt 1 found");
     }
     victim_pa = cand->pa;
     victim_pid = cand->pid;
     victim_va = cand->va;
+    victim_refcnt = cand->ref_cnt;
     release(&mru_lock);
 
     // debug("lru swapout: \n");
     // debug("lru swapout: VICTIM : pid : %d , va : %ld, pa: %p\n", victim_pid, victim_va, victim_pa);
-    uint64 idx = PA2IDX(victim_pa);
-    offset = swap_out(victim_pa, victim_pid, victim_va,mru_map[idx]->ref_cnt);
+    int idx = PA2IDX(victim_pa);
+    offset = swap_out(victim_pa, victim_pid, victim_va,victim_refcnt);
     if (offset < 0)
     {
         // debug("lru swapout : swapout failed\n");
@@ -270,7 +275,9 @@ lru_swapout()
         }
         // debug("updated ptes\n");
     }
-    mru_map[PA2IDX(victim_pa)]->ref_cnt=0;
+    mru_map[idx]->ref_cnt=0;
+    mru_map[idx]->pid=-1;
+    mru_map[idx]->va=0;
     __move_to_end_unlocked(victim_pa);
     release(&mru_lock);
 
