@@ -11,7 +11,6 @@
 #define BLOCKS_PER_PAGE (PGSIZE / BSIZE)
 
 static struct spinlock swap_lock;
-static uint next_swap_block; // The next free block number on disk
 
 struct swap_metadata {
   int pid;
@@ -25,7 +24,6 @@ swap_init(void)
 {
   debug("swap_init()\n");
   initlock(&swap_lock, "swap_lock");
-  next_swap_block = 0;
 }
 
 static int
