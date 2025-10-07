@@ -152,6 +152,7 @@ void            uartputc_sync(int);
 int             uartgetc(void);
 
 // vm.c
+#define uvmunmap(pt, va, n, f) uvmunmap_debug(pt, va, n, f, __FILE__, __LINE__)
 void            kvminit(void);
 void            kvminithart(void);
 void            kvmmap(pagetable_t, uint64, uint64, uint64, int,int);
@@ -162,7 +163,7 @@ uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64,int);
 int             cowuvmcopy(pagetable_t, pagetable_t, uint64,int);
 void            uvmfree(pagetable_t, uint64);
-void            uvmunmap(pagetable_t, uint64, uint64, int);
+void            uvmunmap_debug(pagetable_t, uint64, uint64, int,const char*,int);
 void            uvmclear(pagetable_t, uint64);
 pte_t *         walk(pagetable_t, uint64, int);
 uint64          walkaddr(pagetable_t, uint64);

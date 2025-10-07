@@ -41,7 +41,7 @@ kvmmake(void)
   kpgtbl = (pagetable_t)kalloc();
   memset(kpgtbl, 0, PGSIZE);
   debug("kpgtbl allocated at: %p\n", &kpgtbl);
-
+  mark_kernel((void*)kpgtbl);
   // uart registers
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W, 0);
   debug("UART mapped\n");
@@ -247,8 +247,9 @@ uvmcreate()
 // Remove npages of mappings starting from va. va must be
 // page-aligned. It's OK if the mappings don't exist.
 // Optionally free the physical memory.
-void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+void uvmunmap_debug(pagetable_t pagetable, uint64 va, uint64 npages, int do_free,const char*file,int line)
 {
+  // printf("called from %s %d\n",file,line);
   uint64 a;
   pte_t *pte;
 
@@ -260,18 +261,12 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if ((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
       continue;
     if(PTE_IS_SWAPPED(*pte)){
-      debug("swapped pte in uvmunmap\n");
+      // if(PA2IDX((void*)PTE2PA(*pte)) == 67)
+      // printf("  VA=0x%lx: SWAPPED (offset=%lu)\n", a, PTE_SWAP_GET_OFFSET(*pte));
       if(do_free) {
-        uint64 pa = vmfault(pagetable, a, 0, *pte & PTE_X);
-        if(pa == 0) {
-          // some error in vmfault
-          printf("uvmunmap swapfree!\n");
-          *pte = 0;
-          continue;
-        }else {
-          kfree((void*)pa);
-          debug("freed a swap page after faulting\n");
-        }
+        // printf("uvmunmap swapfree! \n");
+        uint64 offset = PTE_SWAP_GET_OFFSET(*pte);
+        swap_free(offset);
       }
       *pte = 0;
       continue;
@@ -281,6 +276,9 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if (do_free)
     {
       uint64 pa = PTE2PA(*pte);
+      // printf("  VA=0x%lx -> PA=%p, refcnt=%d, PTE=0x%lx\n", 
+      //          a, (void*)pa, get_refcnt(pa), *pte);
+      // printf("kfree called from uvmunmap at pa %p,va\n",(void*)pa);
       kfree((void *)pa);
     }
     *pte = 0;
@@ -355,6 +353,7 @@ void freewalk(pagetable_t pagetable)
     }
     else if (pte & PTE_V)
     {
+      printf("pte id %ld\n",pte);
       panic("freewalk: leaf");
     }
   }
@@ -366,7 +365,10 @@ void freewalk(pagetable_t pagetable)
 void uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if (sz > 0)
+  {
+    // printf("calling uvunmap from uvmfree with mx: %ld",PGROUNDUP(sz,PGSIZE));
     uvmunmap(pagetable, 0, PGROUNDUP(sz, PGSIZE) / PGSIZE, 1);
+  }
   freewalk(pagetable);
 }
 
@@ -424,6 +426,7 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
     if(PTE_IS_SWAPPED(*pte)){
       debug("in cow swap\n");
       if(!COW_SWAP_ENABLED)panic("found swapped cow page when cow swap was disabled\n");
+      printf("cow swap!!\n");
         pte_t *npte = walk(new,i,1);
         if(npte == 0)goto err;
         *npte = *pte;
@@ -446,7 +449,9 @@ int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
     }
     if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
       goto err;
-    mru_incref_helper(pa);
+    if(mru_incref_helper(pa) == 1){
+      panic("inc refcnt is still 1\n");
+    }
     move_to_head_and_set((void*)pa,child_pid,i);
     sfence_vma();
   }
@@ -608,6 +613,7 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 int
 cowhandler(pagetable_t pagetable,uint64 va)
 {
+  printf("cowhandler!!!\n");
   pte_t *pte;
   uint64 pa;
   uint flags;
@@ -659,7 +665,7 @@ int swaphandler(pagetable_t pagetable,pte_t *pte,uint64 va,uint64* mem){
     int offset = PTE_SWAP_GET_OFFSET(*pte);
     *mem = (uint64)kernel_swapin(offset);
     if (*mem == 0){
-      debug("kernel swapin returned 0");
+      panic("kernel swapin returned 0");
       return -1;
     }
     return 0;
@@ -675,9 +681,13 @@ int swaphandler(pagetable_t pagetable,pte_t *pte,uint64 va,uint64* mem){
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
 {
+  if(va >= MAXVA)return 0;
+  struct proc *p = myproc();
+
+  if (va >= p->sz)
+    return 0;
   uint64 mem;
   pte_t *pte;
-  struct proc *p = myproc();
   p->pst.num_page_faults++;
   va = PGROUNDDOWN(va, PGSIZE);
   pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
@@ -695,6 +705,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
     }
     // COW handled successfully, return the physical address
     pte = walk(pagetable, va, 0);
+    move_to_head_and_set((void*)PTE2PA(*pte), p->pid, va);
     return PTE2PA(*pte);
   }
 
@@ -717,6 +728,7 @@ vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
       debug("kalloc returned 0\n");
       return 0;
     }
+    set_only((void*)mem,p->pid,va,get_refcnt(mem));
     memset((void *)mem, 0, PGSIZE);
   }
 
