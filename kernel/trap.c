@@ -74,6 +74,7 @@ usertrap(void)
     }
     else if(vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0,r_scause() == 0xc) != 0){
       // page fault on lazily-allocated page
+      printf("page fault on va!\n");
     }else{
       setkilled(p);
     }

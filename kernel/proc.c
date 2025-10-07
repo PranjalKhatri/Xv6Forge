@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mru.h"
 // #include "swapfile.h"
 struct cpu cpus[NCPU];
 
@@ -38,6 +39,7 @@ proc_mapstacks(pagetable_t kpgtbl)
     char *pa = kalloc();
     if(pa == 0)
       panic("kalloc");
+    mark_kernel((void*)pa);
     uint64 va = KSTACK((int) (p - proc));
     kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W,0);
   }
@@ -140,7 +142,7 @@ found:
     release(&p->lock);
     return 0;
   }
-
+  set_only((void*)p->trapframe,p->pid,TRAPFRAME,1);
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -165,7 +167,10 @@ static void
 freeproc(struct proc *p)
 {
   if(p->trapframe)
+  {
+    // printf("free proc calls kfree on trapframe\n");
     kfree((void*)p->trapframe);
+  }
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
@@ -277,7 +282,7 @@ kfork(void)
   }
 
   // Copy user memory from parent to child.
-  if(cowuvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
