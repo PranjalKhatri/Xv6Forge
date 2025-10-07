@@ -6,6 +6,10 @@
 #define DEBUG_RELOC 0
 #endif
 
+#ifndef DISABLE_SWAPPING
+#define DISABLE_SWAPPING 0
+#endif
+
 #ifndef DEBUG_SWAP_SPACE
 #define DEBUG_SWAP_SPACE 0
 #endif

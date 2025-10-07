@@ -11,6 +11,7 @@
 #include "mru.h"
 #include "swapfile.h"
 #include "kalloc.h"
+#include "config.h"
 
 int replacement_policy;
 uint64 numfreepages;
@@ -72,7 +73,7 @@ kfree(void *pa)
 {
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < (char*)kmem.free_mem_start || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+  // printf("kfree calls decref\n");
   if(mru_decref_helper((uint64)pa)) {
    struct run *r = (struct run *)pa;
     acquire(&kmem.lock);
@@ -103,6 +104,7 @@ kalloc(void)
     if (mru_incref_helper((uint64)r) != 1)
     {
       panic("kalloc: refcnt not returned 1\n");
+      printf("kfree called from kalloc\n");
       kfree(r);
       return 0;
     }
@@ -114,6 +116,7 @@ kalloc(void)
   // Freelist is empty. Release the lock BEFORE calling the function
   // that will perform disk I/O.
   release(&kmem.lock);
+  if(DISABLE_SWAPPING)return 0;
   // printf("swapout request\n");
   // Now it is safe to call mru_swapout(), which may sleep.
   if(replacement_policy == MRU_POLICY)
@@ -141,6 +144,7 @@ void* kernel_swapin(int offset){
   uint64 va_dummy;
   int stored_refcnt;
   if(swap_in((char*)pa, &pid_dummy, &va_dummy, offset,&stored_refcnt) != 0){
+    printf("kfree called from swapin\n");
     kfree(pa); // Read failed, so free the page we just allocated.
     return 0;
   }
