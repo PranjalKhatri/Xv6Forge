@@ -2,6 +2,8 @@ struct mru_node{
     struct mru_node* next;
     struct mru_node* prev;
     int pid;
+    int is_swappable;
+    int is_kernel;
     uint64 va;
     void*pa;
     int ref_cnt;
@@ -9,6 +11,8 @@ struct mru_node{
 void *  mru_init(void * pa_start, int num_pages, struct mru_node * map[]);
 int     PA2IDX(void *pa);
 void    move_to_end(void * pa);
+void    mark_non_swappable(void *pa);
+void    mark_kernel(void *pa);
 void    move_to_head_and_set(void * pa,int pid,uint64 va);
 void    set_only(void *pa, int pid, uint64 va,int refs);
 void    *mru_swapout();

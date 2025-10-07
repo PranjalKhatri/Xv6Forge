@@ -23,7 +23,7 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
     req_pages = (sizeof(struct mru_node) * num_pages + PGSIZE - 1) / PGSIZE;
     mru_map = map;
     mru_map_len = num_pages - req_pages;
-
+    
     char *p = (char *)PGROUNDUP((uint64)pa_start,PGSIZE);
     char *pa = p + req_pages * PGSIZE;
     map_start = pa;
@@ -37,6 +37,8 @@ void *mru_init(void *pa_start, int num_pages, struct mru_node *map[])
         map[j]->va = 0;
         map[j]->ref_cnt=0;
         map[j]->prev = map[j]->next = 0;
+        mru_map[j]->is_swappable=1;
+        mru_map[j]->is_kernel=0;
         if (j != 0)
         {
             map[j]->prev = map[j - 1];
@@ -90,6 +92,21 @@ void move_to_end(void *pa)
     mru_map[idx]->pid = -1;
     mru_map[idx]->va = 0;
     __move_to_end_unlocked(pa);
+    release(&mru_lock);
+}
+// only to be used for kernel pages
+void mark_non_swappable(void *pa)
+{
+    acquire(&mru_lock);
+    mru_map[PA2IDX(pa)]->is_swappable=0;
+    release(&mru_lock);
+}
+
+void mark_kernel(void *pa)
+{
+    acquire(&mru_lock);
+    mru_map[PA2IDX(pa)]->is_kernel=1;
+    mru_map[PA2IDX(pa)]->is_swappable=0;
     release(&mru_lock);
 }
 
@@ -152,7 +169,7 @@ mru_swapout()
     victim_refcnt = node->ref_cnt;
     while(node && node != end){
         //dont swap trampoline and trapfram
-        if(node->va >= TRAPFRAME && node->va < MAXVA){
+        if(!node->is_swappable ||  (node->va >= TRAPFRAME && node->va < MAXVA)){
             node = node->next;
             continue;
         }
@@ -174,29 +191,39 @@ mru_swapout()
     {
         return 0;
     }
-    
+    void *return_pa = 0;
     victim_proc = find_proc(victim_pid);
+    acquire(&mru_lock);
     if (victim_proc)
     {
+        release(&mru_lock);
         pte_t *victim_ptep = walk(victim_proc->pagetable, victim_va, 0);
-        // Ensure the PTE still exists and belongs to the page we swapped out
         acquire(&mru_lock);
+        // Ensure the PTE still exists and belongs to the page we swapped out
         if (victim_ptep && (*victim_ptep & PTE_V) && PTE2PA(*victim_ptep) == (uint64)victim_pa)
         {
             *victim_ptep = PTE_SWAP_SET_OFFSET(offset);
             victim_proc->pst.num_swap_outs++;
+            __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
+            uint64 idx = PA2IDX(victim_pa);
+            mru_map[idx]->pid = -1;
+            mru_map[idx]->va = 0;
+            mru_map[idx]->ref_cnt=0;
+            return_pa = victim_pa;
+        }else{
+            swap_free(offset);
         }
-        release(&mru_lock);
+        // release(&mru_lock);
+    }else{
+        swap_free(offset);
     }
-    acquire(&mru_lock);
-    __move_to_end_unlocked(victim_pa); // Use the unlocked helper to update the list
-    uint64 idx = PA2IDX(victim_pa);
-    mru_map[idx]->pid = -1;
-    mru_map[idx]->va = 0;
-    mru_map[idx]->ref_cnt=0;
+    // acquire(&mru_lock);
+    // if(idx == 67){
+    //     printf("swapout of page 67 now refcnt after is : %d\n",mru_map[idx]->ref_cnt);
+    // }
     release(&mru_lock);
 
-    return victim_pa;
+    return return_pa;
 }
 
 void quarantine_reserved_pages(void)
@@ -359,6 +386,9 @@ int mru_incref_helper(uint64 pa)
   }
   
   count = ++mru_map[idx]->ref_cnt;
+//   if(idx == 67){
+//     // printf("incref in page 67 now refcnt after is : %d\n",mru_map[idx]->ref_cnt);
+//   }
   release(&mru_lock);
   
   return count;
@@ -376,24 +406,27 @@ int mru_decref_helper(uint64 pa)
   int is_free = 0;
 
   acquire(&mru_lock);
-  if (idx >= NUM_PAGES || mru_map[idx]->ref_cnt < 1) {
-    printf("idx: %ld, refcnt: %d\n",idx,mru_map[idx]->ref_cnt);
-    panic("mru_decref_helper: index out of bounds or already zero");
-  }
-
+//   if(idx == 67){
+//     printf("decref in page 67 now refcnt before is : %d\n",mru_map[idx]->ref_cnt);  
+//     }
+    if (idx >= NUM_PAGES || (!mru_map[idx]->is_kernel && mru_map[idx]->ref_cnt < 1)) {
+        printf("idx: %ld, refcnt: %d, pid : %d,pa %p\n",idx,mru_map[idx]->ref_cnt,mru_map[idx]->pid,mru_map[idx]->pa);
+        panic("mru_decref_helper: index out of bounds or already zero");
+    }
+    
   c = --mru_map[idx]->ref_cnt;
-
+  
   if (c == 0)
   {
-    mru_map[idx]->pid = -1; 
-    mru_map[idx]->va = 0;
-    __move_to_end_unlocked((void*)pa);
-    is_free = 1;
-  }
-  
-  release(&mru_lock);
-  
-  return is_free;
+      mru_map[idx]->pid = -1; 
+      mru_map[idx]->va = 0;
+      __move_to_end_unlocked((void*)pa);
+      is_free = 1;
+    }
+    
+    release(&mru_lock);
+    
+    return is_free;
 }
 void 
 mru_set_refcnt(uint64 pa, int refcnt)
@@ -404,7 +437,9 @@ mru_set_refcnt(uint64 pa, int refcnt)
   uint64 idx = PA2IDX((void*)pa);
 
   acquire(&mru_lock);
-  
+//   if(idx == 67)
+//   printf("set ref in page 67 refcnt set is : %d\n",refcnt);
+
   if (idx >= NUM_PAGES) {
     release(&mru_lock);
     panic("mru_set_refcnt: index out of bounds");
