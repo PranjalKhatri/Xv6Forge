@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mru.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -69,12 +70,12 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if((r_scause() == 0xf || r_scause() == 0xd || r_scause() == 0xc) ) {
+    uint64 pa=0;
     if(r_stval() >= MAXVA || r_stval() >= p->sz){
       setkilled(p);
     }
-    else if(vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0,r_scause() == 0xc) != 0){
-      // page fault on lazily-allocated page
-      // printf("page fault on va!\n");
+    else if((pa = vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0,r_scause() == 0xc)) != 0){
+      // page fault on lazily-allocated page/Swapped page/cow fork page
     }else{
       setkilled(p);
     }
