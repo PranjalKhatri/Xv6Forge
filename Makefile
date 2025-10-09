@@ -118,7 +118,8 @@ CUSTOMUPROGS=\
 	$U/_xargs\
 	$U/_ps\
 	$U/_top\
-	$U/_cowtest
+	$U/_cowtest\
+	$U/_bigfiletest
 
 $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
