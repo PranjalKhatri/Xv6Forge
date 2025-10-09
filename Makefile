@@ -119,7 +119,8 @@ CUSTOMUPROGS=\
 	$U/_ps\
 	$U/_top\
 	$U/_cowtest\
-	$U/_bigfiletest
+	$U/_bigfiletest\
+	$U/_symlinktest
 
 $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
