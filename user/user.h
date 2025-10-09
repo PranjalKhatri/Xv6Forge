@@ -55,3 +55,4 @@ int getpagestat(int pid, struct pagestat *st);
 int dumpmru(int);
 int setreplacement_policy(int);
 int getprocinfo(struct procinfo*);
+int symlink(const char*,const char*);
