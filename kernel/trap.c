@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mru.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -69,8 +70,14 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else if((r_scause() == 0xf || r_scause() == 0xd || r_scause() == 0xc) ) {
-    if(vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0,r_scause() == 0xc) != 0){
-      // page fault on lazily-allocated page
+    uint64 pa=0;
+    if(r_stval() >= MAXVA || r_stval() >= p->sz){
+      setkilled(p);
+    }
+    else if((pa = vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0,r_scause() == 0xc)) != 0){
+      // page fault on lazily-allocated page/Swapped page/cow fork page
+    }else{
+      setkilled(p);
     }
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
@@ -82,9 +89,12 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    acquire(&p->lock);
+    p->cputicks++;
+    release(&p->lock);
     yield();
-
+  }
   prepare_return();
 
   // the user page table to switch to, for trampoline.S
@@ -153,8 +163,13 @@ kerneltrap()
   }
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2 && myproc() != 0)
+  struct proc*p=myproc();
+  if(which_dev == 2 && p != 0){
+    acquire(&p->lock);
+    p->cputicks++;
+    release(&p->lock);
     yield();
+  }
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

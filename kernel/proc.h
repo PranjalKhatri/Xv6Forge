@@ -109,6 +109,7 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
-  char name[16];               // Process name (debugging)
+  char name[PROC_NAME_SZ];               // Process name (debugging)
   struct pagestat pst;
+  int cputicks;
 };

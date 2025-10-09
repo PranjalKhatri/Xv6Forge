@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mru.h"
 // #include "swapfile.h"
 struct cpu cpus[NCPU];
 
@@ -38,6 +39,7 @@ proc_mapstacks(pagetable_t kpgtbl)
     char *pa = kalloc();
     if(pa == 0)
       panic("kalloc");
+    mark_kernel((void*)pa);
     uint64 va = KSTACK((int) (p - proc));
     kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W,0);
   }
@@ -133,14 +135,14 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
+  p->cputicks = 0;
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
-
+  set_only((void*)p->trapframe,p->pid,TRAPFRAME,1);
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -166,6 +168,7 @@ freeproc(struct proc *p)
 {
   if(p->trapframe)
     kfree((void*)p->trapframe);
+  
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
@@ -277,11 +280,16 @@ kfork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
+  if(cowuvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+  /*  if(uvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  } */
   np->sz = p->sz;
 
   // copy saved user registers.

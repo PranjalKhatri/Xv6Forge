@@ -8,6 +8,9 @@
 #include "proc.h"
 #include "fs.h"
 #include "mru.h"
+#include "swapfile.h"
+#include "config.h"
+
 /*
  * the kernel's page table.
  */
@@ -38,7 +41,7 @@ kvmmake(void)
   kpgtbl = (pagetable_t)kalloc();
   memset(kpgtbl, 0, PGSIZE);
   debug("kpgtbl allocated at: %p\n", &kpgtbl);
-
+  mark_kernel((void*)kpgtbl);
   // uart registers
   kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W, 0);
   debug("UART mapped\n");
@@ -256,6 +259,14 @@ void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   {
     if ((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
       continue;
+    if(PTE_IS_SWAPPED(*pte)){
+      if(do_free) {
+        uint64 offset = PTE_SWAP_GET_OFFSET(*pte);
+        swap_free(offset);
+      }
+      *pte = 0;
+      continue;
+    }
     if ((*pte & PTE_V) == 0) // has physical page been allocated?
       continue;
     if (do_free)
@@ -335,6 +346,7 @@ void freewalk(pagetable_t pagetable)
     }
     else if (pte & PTE_V)
     {
+      printf("pte id %ld\n",pte);
       panic("freewalk: leaf");
     }
   }
@@ -346,7 +358,9 @@ void freewalk(pagetable_t pagetable)
 void uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if (sz > 0)
+  {
     uvmunmap(pagetable, 0, PGROUNDUP(sz, PGSIZE) / PGSIZE, 1);
+  }
   freewalk(pagetable);
 }
 
@@ -382,6 +396,57 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
     move_to_head_and_set(mem, child_pid, i);
   }
 
+  return 0;
+
+err:
+  uvmunmap(new, 0, i / PGSIZE, 1);
+  return -1;
+}
+
+// maps parent page table in child and increment refcnts
+int cowuvmcopy(pagetable_t old, pagetable_t new, uint64 sz, int child_pid)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+
+  for (i = 0; i < sz; i += PGSIZE)
+  {
+    if ((pte = walk(old, i, 0)) == 0)
+      continue; // page table entry hasn't been allocated
+
+    if(PTE_IS_SWAPPED(*pte)){
+      uint64 tmp_pa;
+      // bring page back into memory
+      if (swaphandler(old, pte, i, &tmp_pa) != 0) {
+        if (!i)
+          i--; // till previous page only
+        goto err;
+      }
+      // tmp_pa now contains physical addr of swapped-in page
+      pa = tmp_pa;
+    }
+
+    if ((*pte & PTE_V) == 0)
+      continue; // physical page hasn't been allocated
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    
+    // If page is writable, make it COW in both parent and child
+    if (flags & PTE_W)
+    {
+      flags = (flags & ~PTE_W) | PTE_COW;
+      *pte = PA2PTE(pa) | flags;
+      // CRITICAL: Flush TLB on parent PTE modification
+      sfence_vma();
+    }
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
+      goto err;
+    if(mru_incref_helper(pa) == 1){
+      panic("inc refcnt is still 1\n");
+    }
+    sfence_vma();
+  }
   return 0;
 
 err:
@@ -425,10 +490,26 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     }
 
     pte = walk(pagetable, va0, 0);
-    // forbid copyout over read-only user text pages.
-    if ((*pte & PTE_W) == 0)
+    if (pte == 0)
       return -1;
-
+    // forbid copyout over read-only user text pages.
+    if ((*pte & PTE_W) == 0){
+      if (PTE_IS_COW(*pte)){
+        if (cowhandler(pagetable, va0) < 0){
+          printf("copyout: COW handler failed\n");
+          return -1;
+        }
+        sfence_vma();
+        pa0 = walkaddr(pagetable, va0);
+        if (pa0 == 0){
+          printf("copyout: remap failed after COW\n");
+          return -1;
+        }
+      }else{
+        printf("copyout forbid\n");
+        return -1;
+      }
+    }
     n = PGSIZE - (dstva - va0);
     if (n > len)
       n = len;
@@ -521,6 +602,70 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
+int
+cowhandler(pagetable_t pagetable,uint64 va)
+{
+  pte_t *pte;
+  uint64 pa,new_pa;
+  uint flags;
+  char *mem;
+  if(va >= MAXVA)
+    return -1;
+  // Round down to page boundary
+  va = PGROUNDDOWN(va,PGSIZE);
+  
+  // Get the PTE
+  if((pte = walk(pagetable, va, 0)) == 0)
+    return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
+  if((*pte & PTE_U) == 0)
+    return -1;
+  
+  // Check if it's a COW page
+  if((*pte & PTE_COW) == 0)
+    return -1;
+  
+  pa = PTE2PA(*pte);
+  flags = PTE_FLAGS(*pte);
+  
+  // Check reference count
+  int refcount = get_refcnt(pa);
+  if(refcount < 0)
+    return -1;
+  
+  if(refcount == 1) {
+    // Only reference - just make it writable again
+    *pte = PA2PTE(pa) | ((flags & ~PTE_COW) | PTE_W);
+    new_pa = pa;
+  } else {
+    if((mem = kalloc()) == 0)
+    return -1;
+    memmove(mem, (char*)pa, PGSIZE);
+    *pte = PA2PTE(mem) | ((flags & ~PTE_COW) | PTE_W);
+    kfree((void*)pa);
+    new_pa =(uint64)mem;
+  }
+  move_to_head_and_set((void*)new_pa,myproc()->pid,va);
+  
+  return 0;
+}
+
+int swaphandler(pagetable_t pagetable,pte_t *pte,uint64 va,uint64* mem){
+  if (PTE_IS_SWAPPED(*pte))
+  {
+    int offset = PTE_SWAP_GET_OFFSET(*pte);
+    *mem = (uint64)kernel_swapin(offset);
+    if (*mem == 0){
+      panic("kernel swapin returned 0");
+      return -1;
+    }
+    return 0;
+  }else{
+    return -1;
+  }
+}
+
 // allocate and map user memory if process is referencing a page
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
@@ -528,52 +673,72 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read, int instruction)
 {
-  uint64 mem;
-  pte_t *pte;
+  if(va >= MAXVA)return 0;
   struct proc *p = myproc();
-  p->pst.num_page_faults++;
+
   if (va >= p->sz)
     return 0;
+  uint64 mem;
+  pte_t *pte;
+  p->pst.num_page_faults++;
   va = PGROUNDDOWN(va, PGSIZE);
-  pte = walk(pagetable, va, 0);
-  if (pte == 0 || ismapped(pagetable, va))
-  {
+  pte = walk(pagetable, va, 0);//not allocating in case its a cow fault
+  if (pte == 0) {
+    // PTE doesn't exist, need to allocate page table
+    pte = walk(pagetable, va, 1);
+    if (pte == 0) {
+      debug("walk failed to allocate page table\n");
+      return 0;
+    }
+  }
+  if (pte && PTE_IS_COW(*pte)) {
+    if (cowhandler(pagetable,va) != 0) {
+      debug("cowhandler returned non zero\n");
+      return 0;
+    }
+    // COW handled successfully, return the physical address
+    pte = walk(pagetable, va, 0);
+    return PTE2PA(*pte);
+  }
+
+  pte = walk(pagetable, va, 1);//not a cow fault, can allcoate
+  if (pte == 0 || ismapped(pagetable, va)){
+    debug("already mapped/pte is 0 pte: %lx",*pte);
     return 0;
   }
-  if (PTE_IS_SWAPPED(*pte))
-  {
-    int offset = PTE_SWAP_GET_OFFSET(*pte);
-    mem = (uint64)kernel_swapin(offset);
-    if (mem == 0)
+  if (PTE_IS_SWAPPED(*pte)) {
+    if(swaphandler(pagetable,pte,va,&mem) == 0)
+      p->pst.num_swap_ins++;
+    else{
+      printf("swap handler failed\n");
       return 0;
-    p->pst.num_swap_ins++;
+    }
   }
-  else
-  {
+  else{
     mem = (uint64)kalloc();
-    if (mem == 0)
+    if (mem == 0){
+      debug("kalloc returned 0\n");
       return 0;
+    }
+    move_to_head_and_set((void*)mem,p->pid,va);
+    // set_only((void*)mem,p->pid,va,get_refcnt(mem));
     memset((void *)mem, 0, PGSIZE);
   }
-  move_to_head_and_set((void *)mem, p->pid, va);
+
   int perm = PTE_U;
   if (instruction)
-  {
     perm |= PTE_R | PTE_X; // executable page
-  }
-  else if (read)
-  {
-    perm |= PTE_R;
-  }
   else
-  {
     perm |= PTE_W | PTE_R;
-  }
+
   if (mappages(p->pagetable, va, PGSIZE, mem, perm) != 0)
   {
+    debug("mappages returned non 0\n");
     kfree((void *)mem);
     return 0;
   }
+  
+  move_to_head_and_set((void *)mem, p->pid, va);
   return mem;
 }
 

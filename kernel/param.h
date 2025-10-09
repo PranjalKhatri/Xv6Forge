@@ -12,4 +12,6 @@
 #define FSSIZE       2000  // size of file system in blocks
 #define MAXPATH      128   // maximum file path name
 #define USERSTACK    1     // user stack pages
-
+#define PROC_NAME_SZ 16
+#define SWAP_BLOCKS 2000
+#define PAGE_META_BLOCKS 51 //TODO change based on SWAP_BLOCKS

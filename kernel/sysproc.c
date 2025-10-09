@@ -8,6 +8,7 @@
 #include "vm.h"
 #include "mru.h"
 #include "kalloc.h"
+#include "procinfo.h"
 
 uint64
 sys_exit(void)
@@ -151,4 +152,52 @@ sys_setreplacement_policy(void){
   }
   replacement_policy = policy;
   return 0;
+}
+
+
+/*
+* The user program passes a pointer to an array of struct procinfo.
+* This system call fills that array with information about all
+* active processes.
+*/
+uint64 sys_getprocinfo(void)
+{
+  extern struct proc proc[NPROC];
+  uint64 user_addr;
+  struct procinfo k_procinfo[NPROC];
+  int num_procs = 0;
+
+  argaddr(0, &user_addr);
+
+  for (struct proc *p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+
+    if (p->state == UNUSED)
+    {
+      release(&p->lock);
+      continue;
+    }
+
+    if (num_procs >= NPROC)
+    {
+      release(&p->lock);
+      break;
+    }
+
+    k_procinfo[num_procs].pid = p->pid;
+    k_procinfo[num_procs].sz = p->sz;
+    safestrcpy(k_procinfo[num_procs].name, p->name, PROC_NAME_SZ);
+    k_procinfo[num_procs].state = p->state;
+    k_procinfo[num_procs].ppid = p->parent ? p->parent->pid : 0;
+    k_procinfo[num_procs].cputicks = p->cputicks;
+    num_procs++;
+    release(&p->lock);
+  }
+
+  if (copyout(myproc()->pagetable, user_addr, (char *)k_procinfo,
+              num_procs * sizeof(struct procinfo)) < 0)
+    return -1;
+
+  return num_procs;
 }

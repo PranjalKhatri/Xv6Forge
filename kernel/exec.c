@@ -7,14 +7,7 @@
 #include "defs.h"
 #include "elf.h"
 #include "random.h"
-
-#ifndef DEBUG_SYMTAB
-#define DEBUG_SYMTAB 0
-#endif
-
-#ifndef DEBUG_RELOC
-#define DEBUG_RELOC 0
-#endif
+#include "config.h"
 
 static int loadseg(pde_t *, uint64, struct inode *, uint, uint);
 
@@ -217,7 +210,6 @@ int kexec(char *path, char **argv)
     sz = aslr_offset;
   }
 
-  // sz = uvmalloc(pagetable, 0, aslr_offset, 0);
   // Load program into memory.
   for (i = 0, off = elf.phoff; i < elf.phnum; i++, off += sizeof(ph))
   {
@@ -312,15 +304,15 @@ int kexec(char *path, char **argv)
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
+  proc_freepagetable(oldpagetable, oldsz);
   p->sz = sz;
   p->trapframe->epc = elf.entry; // initial program counter = ulib.c:start()
   p->trapframe->sp = sp;         // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
   return argc; // this ends up in a0, the first argument to main(argc, argv)
-
-bad:
+  
+  bad:
   if (pagetable)
-    proc_freepagetable(pagetable, sz);
+   proc_freepagetable(pagetable, sz);
   if (ip)
   {
     iunlockput(ip);

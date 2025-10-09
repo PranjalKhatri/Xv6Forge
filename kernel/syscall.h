@@ -25,3 +25,4 @@
 #define SYS_getpagestat             23
 #define SYS_dumpmru                 24
 #define SYS_setreplacement_policy   25
+#define SYS_getprocinfo             26

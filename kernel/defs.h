@@ -1,3 +1,5 @@
+#include "config.h"
+
 struct buf;
 struct context;
 struct file;
@@ -160,6 +162,7 @@ pagetable_t     uvmcreate(void);
 uint64          uvmalloc(pagetable_t, uint64, uint64, int);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 int             uvmcopy(pagetable_t, pagetable_t, uint64,int);
+int             cowuvmcopy(pagetable_t, pagetable_t, uint64,int);
 void            uvmfree(pagetable_t, uint64);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
@@ -169,6 +172,8 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
+int             cowhandler(pagetable_t,uint64);
+int             swaphandler(pagetable_t, pte_t*, uint64, uint64*);
 uint64          vmfault(pagetable_t, uint64, int,int);
 
 // plic.c
@@ -188,7 +193,7 @@ void            virtio_disk_intr(void);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
 
-#ifndef NDEBUG
+#if !NDEBUG
   #define debug(fmt, ...) printf(fmt, ##__VA_ARGS__)
 #else
   #define debug(fmt, ...)

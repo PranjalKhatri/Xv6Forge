@@ -5,7 +5,7 @@
 #include "defs.h"
 #include "swapfile.h"
 #include "random.h"
-
+#include "swapspace.h"
 volatile static int started = 0;
 
 // start() jumps here in supervisor mode on all CPUs.
@@ -30,6 +30,7 @@ main()
     iinit();         // inode table
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
+    swapspace_init(); //initialize free space bitmap used by swapfile
     swap_init();      //initializ the swap locks
     srand(rdtime());   //seed the rng for the kernel
     userinit();      // first user process

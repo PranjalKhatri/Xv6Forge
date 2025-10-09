@@ -47,3 +47,4 @@ entry("getfreemem");
 entry("getpagestat");
 entry("dumpmru");
 entry("setreplacement_policy");
+entry("getprocinfo");

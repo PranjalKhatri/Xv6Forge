@@ -31,7 +31,8 @@ OBJS = \
   $K/virtio_disk.o\
   $K/mru.o\
   $K/swapfile.o\
-  $K/random.o
+  $K/random.o\
+  $K/swapspace.o
 
 # riscv64-unknown-elf- or riscv64-linux-gnu-
 # perhaps in /opt/riscv/bin
@@ -114,7 +115,10 @@ CUSTOMUPROGS=\
 	$U/_freememtest\
 	$U/_sbrktest\
 	$U/_buffervuln\
-	$U/_xargs
+	$U/_xargs\
+	$U/_ps\
+	$U/_top\
+	$U/_cowtest
 
 $(ASLROBJS): $(U)/%.o: $(U)/%.c
 	$(CC) $(U_CFLAGS) -c -o $@ $<
