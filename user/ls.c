@@ -24,6 +24,19 @@ fmtname(char *path)
   return buf;
 }
 
+// Convert file type to string
+char*
+type_to_string(int type)
+{
+  switch(type){
+    case T_DIR:     return "dir ";
+    case T_FILE:    return "file";
+    case T_DEVICE:  return "dev ";
+    case T_SYMLINK: return "link";
+    default:        return "?   ";
+  }
+}
+
 void
 ls(char *path)
 {
@@ -32,6 +45,7 @@ ls(char *path)
   struct dirent de;
   struct stat st;
 
+  // Open normally - follow symlinks for the main path
   if((fd = open(path, O_RDONLY)) < 0){
     fprintf(2, "ls: cannot open %s\n", path);
     return;
@@ -46,7 +60,8 @@ ls(char *path)
   switch(st.type){
   case T_DEVICE:
   case T_FILE:
-    printf("%s %d %d %d\n", fmtname(path), st.type, st.ino, (int) st.size);
+  case T_SYMLINK:
+    printf("%s\t%s\t%d\t%d\n", fmtname(path), type_to_string(st.type), st.ino, (int) st.size);
     break;
 
   case T_DIR:
@@ -62,11 +77,20 @@ ls(char *path)
         continue;
       memmove(p, de.name, DIRSIZ);
       p[DIRSIZ] = 0;
-      if(stat(buf, &st) < 0){
-        printf("ls: cannot stat %s\n", buf);
+      
+      // Open with O_NOFOLLOW to get symlink info without following
+      int tmpfd = open(buf, O_RDONLY | O_NOFOLLOW);
+      if(tmpfd < 0){
+        printf("ls: cannot open %s\n", buf);
         continue;
       }
-      printf("%s %d %d %d\n", fmtname(buf), st.type, st.ino, (int) st.size);
+      if(fstat(tmpfd, &st) < 0){
+        printf("ls: cannot stat %s\n", buf);
+        close(tmpfd);
+        continue;
+      }
+      close(tmpfd);
+      printf("%s\t%s\t%d\t%d\n", fmtname(buf), type_to_string(st.type), st.ino, (int) st.size);
     }
     break;
   }
