@@ -167,10 +167,8 @@ static void
 freeproc(struct proc *p)
 {
   if(p->trapframe)
-  {
-    // printf("free proc calls kfree on trapframe\n");
     kfree((void*)p->trapframe);
-  }
+  
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
@@ -282,7 +280,7 @@ kfork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
+  if(cowuvmcopy(p->pagetable, np->pagetable, p->sz,np->pid) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;

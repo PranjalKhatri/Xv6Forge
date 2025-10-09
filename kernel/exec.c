@@ -210,7 +210,6 @@ int kexec(char *path, char **argv)
     sz = aslr_offset;
   }
 
-  // sz = uvmalloc(pagetable, 0, aslr_offset, 0);
   // Load program into memory.
   for (i = 0, off = elf.phoff; i < elf.phnum; i++, off += sizeof(ph))
   {
