@@ -419,7 +419,7 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
   bn -= NDIRECT;
-
+  
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0){
@@ -434,6 +434,48 @@ bmap(struct inode *ip, uint bn)
       addr = balloc(ip->dev);
       if(addr){
         a[bn] = addr;
+        log_write(bp);
+      }
+    }
+    brelse(bp);
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  if (bn < 1uLL * NINDIRECT * NINDIRECT) { // in the second level indirection
+    // load the inindirection block,allocating if necessary
+    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
+      addr = balloc(ip->dev);
+      if (addr == 0)
+        return 0;
+      ip->addrs[NDIRECT + 1] = addr;
+    }
+    bp = bread(ip->dev, addr);
+    a = (uint *)bp->data;
+
+    uint idx1 = bn / NINDIRECT;
+    uint idx2 = bn % NINDIRECT;
+
+    uint indirect_addr = a[idx1];
+    if (indirect_addr == 0) {
+      indirect_addr = balloc(ip->dev);
+      if (indirect_addr == 0) {
+        brelse(bp);
+        return 0;
+      }
+      a[idx1] = indirect_addr;
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, indirect_addr);
+    a = (uint *)bp->data;
+
+    addr = a[idx2];
+    if (addr == 0) {
+      addr = balloc(ip->dev);
+      if (addr) {
+        a[idx2] = addr;
         log_write(bp);
       }
     }
@@ -470,6 +512,29 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+  // Free double indirect blocks
+  if (ip->addrs[NDIRECT + 1]) {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]); // read double indirect block
+    a = (uint *)bp->data;
+
+    for (uint i = 0; i < NINDIRECT; i++) { // first-level indirect blocks
+      uint indirect_addr = a[i];
+      if (indirect_addr) {
+        struct buf *bp2 = bread(ip->dev, indirect_addr); 
+        uint *a2 = (uint *)bp2->data;
+        for (uint j = 0; j < NINDIRECT; j++) { // free actual data 
+          if (a2[j])
+            bfree(ip->dev, a2[j]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, indirect_addr); // free first-level 
+      }
+    }
+
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
