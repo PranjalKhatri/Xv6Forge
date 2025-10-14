@@ -219,9 +219,9 @@ void shebang_run(struct execcmd *ecmd)
       if (i >= MAXARGS)
         panic("too many args");
       new_argv[i] = 0; // NULL termination
-      for(int j = 0;j < i;j++){
-        printf("%s ",new_argv[j]);
-      }
+      // for(int j = 0;j < i;j++){
+      //   printf("%s ",new_argv[j]);
+      // }
       printf("\n");
       // Execute the interpreter with the new argument list
       exec(new_argv[0], new_argv);
@@ -231,9 +231,7 @@ void shebang_run(struct execcmd *ecmd)
       // exit(1);
       return;
     }
-    // Else (it's a script without shebang, e.g., a simple sh script),
-    // standard xv6 shells often try to execute it with /bin/sh.
-    // We omit that fallback for a pure shebang implementation.
+    
   }
 }
 
