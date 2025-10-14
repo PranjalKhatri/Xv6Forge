@@ -33,6 +33,7 @@ void *memmove(void*, const void*, int);
 char* strchr(const char*, char c);
 int strcmp(const char*, const char*);
 char* gets(char*, int max);
+int getdelim(int, char*, char, int max);
 uint strlen(const char*);
 char* strcat(char *dest, const char *src);
 void* memset(void*, int, uint);
