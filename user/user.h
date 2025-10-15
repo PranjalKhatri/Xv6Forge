@@ -1,4 +1,9 @@
 #define SBRK_ERROR ((char *)-1)
+#define KEY_UP    1001
+#define KEY_DOWN  1002
+#define KEY_LEFT  1003
+#define KEY_RIGHT 1004
+#define KEY_HOME  1005 
 
 struct stat;
 struct pagestat;
@@ -57,3 +62,5 @@ int dumpmru(int);
 int setreplacement_policy(int);
 int getprocinfo(struct procinfo*);
 int symlink(const char*,const char*);
+int setconsmode(int);
+int getch();

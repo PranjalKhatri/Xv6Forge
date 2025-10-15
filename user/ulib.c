@@ -186,3 +186,45 @@ sbrklazy(int n) {
   return sys_sbrk(n, SBRK_LAZY);
 }
 
+
+enum esc_state { ESC_NONE, ESC_SEEN, ESC_BRACKET };
+//must be called after setting consmode to CONS_RAW
+int 
+getch() {
+    static enum esc_state state = ESC_NONE;
+    char c;
+
+    while (1) {
+        if (read(0, &c, 1) <= 0) 
+            continue;  // wait for input
+
+        switch (state) {
+            case ESC_NONE:
+                if (c == 27) {       // ESC
+                    state = ESC_SEEN;
+                } else {
+                    return c;        // normal char
+                }
+                break;
+
+            case ESC_SEEN:
+                if (c == '[') {
+                    state = ESC_BRACKET;
+                } else {
+                    state = ESC_NONE;
+                    return c;        // lone ESC or unknown, return as-is
+                }
+                break;
+
+            case ESC_BRACKET:
+                state = ESC_NONE;
+                if (c == 'A') return KEY_UP;
+                if (c == 'B') return KEY_DOWN;
+                if (c == 'C') return KEY_RIGHT;
+                if (c == 'D') return KEY_LEFT;
+                if (c == 'H') return KEY_HOME;
+                // ignore other sequences
+                break;
+        }
+    }
+}
