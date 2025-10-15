@@ -27,3 +27,4 @@
 #define SYS_setreplacement_policy   25
 #define SYS_getprocinfo             26
 #define SYS_symlink                 27
+#define SYS_setconsmode             28

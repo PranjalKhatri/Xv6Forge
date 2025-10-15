@@ -9,6 +9,7 @@
 #include "mru.h"
 #include "kalloc.h"
 #include "procinfo.h"
+#include "console.h"
 
 uint64
 sys_exit(void)
@@ -200,4 +201,15 @@ uint64 sys_getprocinfo(void)
     return -1;
 
   return num_procs;
+}
+
+uint64 
+sys_setconsmode(void){
+  int mode;
+  argint(0,&mode);
+  if(mode != CONS_RAW && mode != CONS_BUFFERED){
+    return -1;
+  }
+  setconsMode(mode);
+  return 0;
 }

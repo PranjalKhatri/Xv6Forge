@@ -49,3 +49,4 @@ entry("dumpmru");
 entry("setreplacement_policy");
 entry("getprocinfo");
 entry("symlink");
+entry("setconsmode");
