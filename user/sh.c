@@ -3,6 +3,7 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/fcntl.h"
+#include "readline.h"
 
 // Parsed command representation
 #define EXEC  1
@@ -240,7 +241,8 @@ getcmd(char *buf, int nbuf)
 {
   write(2, "$ ", 2);
   memset(buf, 0, nbuf);
-  gets(buf, nbuf);
+  // gets(buf, nbuf);
+  getLine(buf);
   if(buf[0] == 0) // EOF
     return -1;
   return 0;
@@ -251,7 +253,7 @@ getcmd(char *buf, int nbuf)
 int
 main(int argc,char **argv)
 {
-  static char buf[100];
+  static char buf[MAX_CMD];
   int fd;
 
   // Ensure that three file descriptors are open.
@@ -288,6 +290,8 @@ main(int argc,char **argv)
     }
     exit(0); // only run the given command(s), then quit
   }
+  
+  setupConsole();
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
     char *cmd = buf;
