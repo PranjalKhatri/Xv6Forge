@@ -21,6 +21,7 @@
 #include "riscv.h"
 #include "defs.h"
 #include "proc.h"
+#include "console.h"
 
 #define BACKSPACE 0x100
 #define C(x)  ((x)-'@')  // Control-x
@@ -41,11 +42,18 @@ consputc(int c)
   }
 }
 
+enum {
+    ESC_NONE,      // normal input
+    ESC_SEEN,      // saw ESC (27)
+    ESC_BRACKET   // saw ESC then '['
+} esc_state_t = ESC_NONE;
+const int ESC_CODE = 27;
+
 struct {
   struct spinlock lock;
-  
+  uint mode;
   // input
-#define INPUT_BUF_SIZE 128
+  #define INPUT_BUF_SIZE 128
   char buf[INPUT_BUF_SIZE];
   uint r;  // Read index
   uint w;  // Write index
@@ -152,33 +160,67 @@ consoleintr(int c)
       consputc(BACKSPACE);
     }
     break;
-  case C('H'): // Backspace
-  case '\x7f': // Delete key
-    if(cons.e != cons.w){
-      cons.e--;
-      consputc(BACKSPACE);
-    }
-    break;
+  // case C('H'): // Backspace
+  // case '\x7f': // Delete key
+  //   if(cons.e != cons.w){
+  //     cons.e--;
+  //     consputc(BACKSPACE);
+  //   }
+  //   break;
   default:
     if(c != 0 && cons.e-cons.r < INPUT_BUF_SIZE){
       c = (c == '\r') ? '\n' : c;
-
-      // echo back to the user.
-      consputc(c);
-
-      // store for consumption by consoleread().
-      cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
-
-      if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE){
-        // wake up consoleread() if a whole line (or end-of-file)
-        // has arrived.
+      //user handles backspace in raw mode.
+      if(cons.mode == CONS_RAW){
+        if(esc_state_t == ESC_NONE && c == ESC_CODE){
+          esc_state_t = ESC_SEEN;
+        }else if(esc_state_t == ESC_SEEN && c == '['){
+          esc_state_t = ESC_BRACKET;
+        }else if(esc_state_t == ESC_BRACKET){
+          esc_state_t = ESC_NONE;
+        }else{
+          consputc(c);
+        }
+        cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
         cons.w = cons.e;
         wakeup(&cons.r);
+      }else if(cons.mode == CONS_BUFFERED){
+        if(c == C('H') || c == '\x7f'){
+          if(cons.e != cons.w){
+            cons.e--;
+            consputc(BACKSPACE);
+          }
+          break;
+        }
+        // echo back to the user.
+        consputc(c);
+
+        // store for consumption by consoleread().
+        cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
+
+        if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE){
+          // wake up consoleread() if a whole line (or end-of-file)
+          // has arrived.
+          cons.w = cons.e;
+          wakeup(&cons.r);
+        }
       }
     }
-    break;
+      break;
   }
   
+  release(&cons.lock);
+}
+void
+setconsMode(int md){
+  acquire(&cons.lock);
+  if(md == CONS_RAW){
+    cons.w=cons.e;
+    wakeup(&cons.r);
+    cons.mode = CONS_RAW;
+  }else{
+    cons.mode = CONS_BUFFERED;
+  }
   release(&cons.lock);
 }
 
