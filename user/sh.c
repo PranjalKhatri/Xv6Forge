@@ -242,9 +242,9 @@ getcmd(char *buf, int nbuf)
   write(2, "$ ", 2);
   memset(buf, 0, nbuf);
   // gets(buf, nbuf);
-  getLine(buf);
-  if(buf[0] == 0) // EOF
-    return -1;
+  if(getLine(buf) < 0)return -1;
+  // if(buf[0] == 0) // EOF
+  //   return -1;
   return 0;
 }
 
