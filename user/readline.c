@@ -3,6 +3,8 @@
 #include "kernel/console.h"
 #include "readline.h"
 
+#define C(x) ((x)-'@')
+
 static char history[HISTORY_SIZE][MAX_CMD];
 static int cur = 0;
 static char *err_commandsize = "command too long!";
@@ -115,7 +117,7 @@ int getLine(char *dest)
             memset(buf, 0, sizeof(buf));
             return 0;
         }
-        else if (c == 4)
+        else if (c == C('D'))
         {
             write(1, "\n", 1);
             return -1;
@@ -147,6 +149,9 @@ int getLine(char *dest)
                 write(2, err_commandsize, strlen(err_commandsize));
                 write(2, "\n", 1);
             }
+        }else{
+            write(1,"\b \b",4);//clear the unsupported character
+            write(2,"\a",2);//beep
         }
     }
 
