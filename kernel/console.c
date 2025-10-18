@@ -95,6 +95,18 @@ check_timeout(void)
   return 0;
 }
 
+void
+cons_timer_tick(void)
+{
+  acquire(&cons.lock);
+  if(check_timeout() && cons.r == cons.w) {
+    // printf("wakeup\n");
+    // Timeout expired and no data waiting
+    wakeup(&cons.r);
+  }
+  release(&cons.lock);
+}
+
 //
 // user read()s from the console go here.
 // copy (up to) a whole input line to dst.

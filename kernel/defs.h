@@ -27,6 +27,7 @@ void            setconsMode(int);
 void            ConsSetFlag(int, int);
 void            GetConsState(struct cons_state*);
 void            SetConsState(struct cons_state*);
+void            cons_timer_tick(void);
 // exec.c
 int             kexec(char*, char**);
 
