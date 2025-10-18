@@ -13,6 +13,15 @@ typedef enum
   true = 1
 } bool;
 
+/*** data ***/
+struct editorConfig {
+  int rows;
+  int columns;
+};
+struct editorConfig E;
+struct cons_state cs_initial, cs_raw;
+
+void get_window_size(int *rows, int *cols);
 bool isCntrl(unsigned char c);
 
 /*** cleanup and exit ***/
@@ -21,7 +30,6 @@ void die(const char *s);
 void cleanupAndExit(int status);
 
 /*** terminal ***/
-struct cons_state cs_initial, cs_raw;
 void enableRawMode();
 
 char editorReadKey()
@@ -37,7 +45,7 @@ char editorReadKey()
 /*** output ***/
 void editorDrawRows() {
   int y;
-  for (y = 0; y < 24; y++) {
+  for (y = 0; y < E.rows; y++) {
     write(STDOUT, "~\r\n", 3);
   }
 }
@@ -65,6 +73,7 @@ void editorProcessKeypress()
 int main()
 {
   enableRawMode();
+  get_window_size(&E.rows,&E.columns);
   while(1){
     editorRefreshScreen();
     editorProcessKeypress();
@@ -106,4 +115,46 @@ void enableRawMode()
 
   if (SetConsState(&cs_raw) < 0)
     die("Unable to set raw console mode\n");
+}
+
+void get_window_size(int *rows, int *cols) {
+  write(STDOUT, "\x1b[s", 3);      // Save cursor
+  write(STDOUT, "\x1b[999;999H", 10); // Move to bottom-right
+  write(STDOUT, "\x1b[6n", 4);     // Request cursor position
+  
+  // Read response: ESC [ rows ; cols R
+  char buf[32];
+  int nread = read(STDIN, buf, sizeof(buf));
+  
+  *rows = 24;
+  *cols = 80;
+  
+  // Parse "ESC [ rows ; cols R"
+  if(nread > 0 && buf[0] == '\x1b' && buf[1] == '[') {
+    int r = 0, c = 0;
+    int i = 2;
+    
+    // Parse rows
+    while(i < nread && buf[i] >= '0' && buf[i] <= '9') {
+      r = r * 10 + (buf[i] - '0');
+      i++;
+    }
+    
+    // Skip semicolon
+    if(i < nread && buf[i] == ';')
+      i++;
+    
+    // Parse cols
+    while(i < nread && buf[i] >= '0' && buf[i] <= '9') {
+      c = c * 10 + (buf[i] - '0');
+      i++;
+    }
+    
+    if(r > 0 && c > 0) {
+      *rows = r;
+      *cols = c;
+    }
+  }
+  
+  write(STDOUT, "\x1b[u", 3);      // Restore cursor
 }
