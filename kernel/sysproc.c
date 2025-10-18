@@ -226,7 +226,7 @@ sys_GetConsState(void){
   uint64 state;
   struct cons_state kstate;
   argaddr(0, &state);
-  if(state == 0 || state % sizeof(struct cons_state) != 0){
+  if(state == 0){
     return -1;
   }
   GetConsState(&kstate);
@@ -241,7 +241,7 @@ sys_SetConsState(void){
   uint64 state;
   struct cons_state kstate;
   argaddr(0, &state);
-  if(state == 0 || state % sizeof(struct cons_state) != 0){
+  if(state == 0 ){
     return -1;
   }
   if(copyin(myproc()->pagetable, (char*)&kstate, state, sizeof(struct cons_state)) < 0){
