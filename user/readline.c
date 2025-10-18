@@ -17,6 +17,9 @@ static int hisindx = 0;
 int setupConsole()
 {
     setconsmode(CONS_RAW);
+    ConsSetFlag(CONS_FLG_ECHO,1);
+    ConsSetFlag(CONS_FLG_COOKED,1);
+    ConsSetFlag(CONS_FLG_PROCDUMP,1);
     return 0;
 }
 
