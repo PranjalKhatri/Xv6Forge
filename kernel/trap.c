@@ -185,6 +185,7 @@ clockintr()
     ticks++;
     wakeup(&ticks);
     release(&tickslock);
+    cons_timer_tick();
   }
 
   // ask for the next timer interrupt. this also clears
