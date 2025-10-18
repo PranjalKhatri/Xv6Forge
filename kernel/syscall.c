@@ -108,6 +108,9 @@ extern uint64 sys_getfreemem(void);
 extern uint64 sys_getprocinfo(void);
 extern uint64 sys_symlink(void);
 extern uint64 sys_setconsmode(void);
+extern uint64 sys_ConsSetFlag(void);
+extern uint64 sys_GetConsState(void);
+extern uint64 sys_SetConsState(void);
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
 static uint64 (*syscalls[])(void) = {
@@ -140,6 +143,9 @@ static uint64 (*syscalls[])(void) = {
 [SYS_getprocinfo]           sys_getprocinfo,
 [SYS_symlink]               sys_symlink,
 [SYS_setconsmode]           sys_setconsmode,
+[SYS_ConsSetFlag]           sys_ConsSetFlag,
+[SYS_GetConsState]          sys_GetConsState,
+[SYS_SetConsState]          sys_SetConsState,
 };
 
 void

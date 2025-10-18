@@ -28,3 +28,6 @@
 #define SYS_getprocinfo             26
 #define SYS_symlink                 27
 #define SYS_setconsmode             28
+#define SYS_ConsSetFlag             29
+#define SYS_GetConsState            30
+#define SYS_SetConsState            31

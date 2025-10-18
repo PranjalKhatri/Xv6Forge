@@ -50,3 +50,6 @@ entry("setreplacement_policy");
 entry("getprocinfo");
 entry("symlink");
 entry("setconsmode");
+entry("ConsSetFlag");
+entry("GetConsState");
+entry("SetConsState");

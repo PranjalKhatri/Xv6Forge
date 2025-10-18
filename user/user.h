@@ -8,6 +8,8 @@
 struct stat;
 struct pagestat;
 struct procinfo;
+struct cons_state;
+
 // system calls
 int fork(void);
 int exit(int) __attribute__((noreturn));
@@ -63,4 +65,7 @@ int setreplacement_policy(int);
 int getprocinfo(struct procinfo*);
 int symlink(const char*,const char*);
 int setconsmode(int);
+int ConsSetFlag(int,int);
+int GetConsState(struct cons_state*);
+int SetConsState(struct cons_state*);
 int getch();

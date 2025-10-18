@@ -213,3 +213,40 @@ sys_setconsmode(void){
   setconsMode(mode);
   return 0;
 }
+uint64
+sys_ConsSetFlag(void){
+  int flg, set;
+  argint(0, &flg);
+  argint(1, &set);
+  ConsSetFlag(flg, set);
+  return 0;
+}
+uint64
+sys_GetConsState(void){
+  uint64 state;
+  struct cons_state kstate;
+  argaddr(0, &state);
+  if(state == 0 || state % sizeof(struct cons_state) != 0){
+    return -1;
+  }
+  GetConsState(&kstate);
+  if(copyout(myproc()->pagetable, state, (char*)&kstate, sizeof(struct cons_state)) < 0){
+    return -1;
+  }
+  return 0;
+}
+
+uint64
+sys_SetConsState(void){
+  uint64 state;
+  struct cons_state kstate;
+  argaddr(0, &state);
+  if(state == 0 || state % sizeof(struct cons_state) != 0){
+    return -1;
+  }
+  if(copyin(myproc()->pagetable, (char*)&kstate, state, sizeof(struct cons_state)) < 0){
+    return -1;
+  }
+  SetConsState(&kstate);
+  return 0;
+}

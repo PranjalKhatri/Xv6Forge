@@ -10,7 +10,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
-
+struct cons_state;
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -24,6 +24,9 @@ void            consoleinit(void);
 void            consoleintr(int);
 void            consputc(int);
 void            setconsMode(int);
+void            ConsSetFlag(int, int);
+void            GetConsState(struct cons_state*);
+void            SetConsState(struct cons_state*);
 // exec.c
 int             kexec(char*, char**);
 
