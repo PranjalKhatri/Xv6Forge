@@ -51,7 +51,7 @@ const int ESC_CODE = 27;
 
 struct {
   struct spinlock lock;
-  uint mode;
+  struct cons_state state;
   // input
   #define INPUT_BUF_SIZE 128
   char buf[INPUT_BUF_SIZE];
@@ -171,7 +171,7 @@ consoleintr(int c)
     if(c != 0 && cons.e-cons.r < INPUT_BUF_SIZE){
       c = (c == '\r') ? '\n' : c;
       //user handles backspace in raw mode.
-      if(cons.mode == CONS_RAW){
+      if(cons.state.mode == CONS_RAW){
         if(esc_state_t == ESC_NONE && c == ESC_CODE){
           esc_state_t = ESC_SEEN;
         }else if(esc_state_t == ESC_SEEN && c == '['){
@@ -179,12 +179,13 @@ consoleintr(int c)
         }else if(esc_state_t == ESC_BRACKET){
           esc_state_t = ESC_NONE;
         }else{
+          if(cons.state.flags&CONS_FLG_ECHO)
           consputc(c);
         }
         cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
         cons.w = cons.e;
         wakeup(&cons.r);
-      }else if(cons.mode == CONS_BUFFERED){
+      }else if(cons.state.mode == CONS_BUFFERED){
         if(c == C('H') || c == '\x7f'){
           if(cons.e != cons.w){
             cons.e--;
@@ -217,10 +218,33 @@ setconsMode(int md){
   if(md == CONS_RAW){
     cons.w=cons.e;
     wakeup(&cons.r);
-    cons.mode = CONS_RAW;
+    cons.state.mode = CONS_RAW;
   }else{
-    cons.mode = CONS_BUFFERED;
+    cons.state.mode = CONS_BUFFERED;
   }
+  release(&cons.lock);
+}
+void
+ConsSetFlag(int flg, int set){
+  set = set ? 1 : 0;
+  acquire(&cons.lock);
+  if(set)
+    cons.state.flags |= flg;
+  else
+    cons.state.flags &=  ~flg;
+  release(&cons.lock);
+}
+
+void GetConsState(struct cons_state *state){
+  acquire(&cons.lock);
+    state->flags = cons.state.flags;
+    state->mode  = cons.state.mode;
+  release(&cons.lock);
+}
+void SetConsState(struct cons_state* state){
+  acquire(&cons.lock);
+    cons.state.flags = state->flags;
+    cons.state.mode  = state->mode;
   release(&cons.lock);
 }
 
@@ -230,7 +254,8 @@ consoleinit(void)
   initlock(&cons.lock, "cons");
 
   uartinit();
-
+  cons.state.flags |= CONS_FLG_ECHO;
+  printf("console state %d\n",cons.state.flags);
   // connect read and write system calls
   // to consoleread and consolewrite.
   devsw[CONSOLE].read = consoleread;
