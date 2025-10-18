@@ -46,7 +46,7 @@ enum {
     ESC_NONE,      // normal input
     ESC_SEEN,      // saw ESC (27)
     ESC_BRACKET   // saw ESC then '['
-} esc_state_t = ESC_NONE;
+} esc_state = ESC_NONE;
 const int ESC_CODE = 27;
 
 struct {
@@ -82,6 +82,19 @@ consolewrite(int user_src, uint64 src, int n)
   return i;
 }
 
+// Check if read timeout has expired
+static int
+check_timeout(void)
+{
+  if(cons.state.vtime == 0)
+    return 0;
+  
+  if(ticks - cons.state.last_read_tick >= cons.state.vtime) {
+    return 1;
+  }
+  return 0;
+}
+
 //
 // user read()s from the console go here.
 // copy (up to) a whole input line to dst.
@@ -101,6 +114,14 @@ consoleread(int user_dst, uint64 dst, int n)
     // wait until interrupt handler has put some
     // input into cons.buffer.
     while(cons.r == cons.w){
+
+      if(cons.state.vmin == 0 && cons.state.vtime > 0) {
+        // VMIN=0, VTIME>0: non-blocking with timeout
+        if(check_timeout()) {
+          release(&cons.lock);
+          return target-n; //possibly 0 also
+        }
+      }
       if(killed(myproc())){
         release(&cons.lock);
         return -1;
@@ -109,8 +130,9 @@ consoleread(int user_dst, uint64 dst, int n)
     }
 
     c = cons.buf[cons.r++ % INPUT_BUF_SIZE];
+    cons.state.last_read_tick = ticks;
 
-    if(c == C('D')){  // end-of-file
+    if((cons.state.flags&CONS_FLG_COOKED) &&c == C('D')){  // end-of-file
       if(n < target){
         // Save ^D for next time, to make sure
         // caller gets a 0-byte result.
@@ -127,7 +149,10 @@ consoleread(int user_dst, uint64 dst, int n)
     dst++;
     --n;
 
-    if(c == '\n'){
+    if(cons.state.vmin > 0 && target-n >= cons.state.vmin) {
+      break;
+    }
+    if((cons.state.flags&CONS_FLG_COOKED) && c == '\n'){
       // a whole line has arrived, return to
       // the user-level read().
       break;
@@ -149,43 +174,54 @@ consoleintr(int c)
 {
   acquire(&cons.lock);
 
+  int is_cooked   = cons.state.flags & CONS_FLG_COOKED;
+  int echo_back   = cons.state.flags & CONS_FLG_ECHO;
+  int proc_dump   = cons.state.flags & CONS_FLG_PROCDUMP;
+  int is_raw      = cons.state.mode == CONS_RAW;
+  int is_buffered = cons.state.mode == CONS_BUFFERED;
+
   switch(c){
   case C('P'):  // Print process list.
-    procdump();
-    break;
-  case C('U'):  // Kill line.
-    while(cons.e != cons.w &&
-          cons.buf[(cons.e-1) % INPUT_BUF_SIZE] != '\n'){
-      cons.e--;
-      consputc(BACKSPACE);
+    if(proc_dump){
+      procdump();
+    }else if (is_raw) {
+      // In raw mode with procdump disabled, treat it as normal input
+      cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
+      cons.w = cons.e;
+      wakeup(&cons.r);
     }
     break;
-  // case C('H'): // Backspace
-  // case '\x7f': // Delete key
-  //   if(cons.e != cons.w){
-  //     cons.e--;
-  //     consputc(BACKSPACE);
-  //   }
-  //   break;
+  case C('U'):  // Kill line.
+    if(is_cooked){
+      while(cons.e != cons.w &&
+            cons.buf[(cons.e-1) % INPUT_BUF_SIZE] != '\n'){
+        cons.e--;
+        consputc(BACKSPACE);
+      }
+      break;
+    }else{
+      // fall through to default //TODO: change this design of falling through to more robust one
+    }
   default:
     if(c != 0 && cons.e-cons.r < INPUT_BUF_SIZE){
       c = (c == '\r') ? '\n' : c;
       //user handles backspace in raw mode.
-      if(cons.state.mode == CONS_RAW){
-        if(esc_state_t == ESC_NONE && c == ESC_CODE){
-          esc_state_t = ESC_SEEN;
-        }else if(esc_state_t == ESC_SEEN && c == '['){
-          esc_state_t = ESC_BRACKET;
-        }else if(esc_state_t == ESC_BRACKET){
-          esc_state_t = ESC_NONE;
+      if(is_raw){
+        if(esc_state == ESC_NONE && c == ESC_CODE){
+          esc_state = ESC_SEEN;
+        }else if(esc_state == ESC_SEEN && c == '['){
+          esc_state = ESC_BRACKET;
+        }else if(esc_state == ESC_BRACKET){
+          esc_state = ESC_NONE;
         }else{
-          if(cons.state.flags&CONS_FLG_ECHO)
-          consputc(c);
+          if(echo_back){
+            consputc(c);
+          }
         }
         cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
         cons.w = cons.e;
         wakeup(&cons.r);
-      }else if(cons.state.mode == CONS_BUFFERED){
+      }else if(is_buffered){
         if(c == C('H') || c == '\x7f'){
           if(cons.e != cons.w){
             cons.e--;
@@ -194,12 +230,13 @@ consoleintr(int c)
           break;
         }
         // echo back to the user.
-        consputc(c);
+        if(echo_back)
+          consputc(c);
 
         // store for consumption by consoleread().
         cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
 
-        if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE){
+        if(c == '\n' || (is_cooked && c == C('D')) || cons.e-cons.r == INPUT_BUF_SIZE){
           // wake up consoleread() if a whole line (or end-of-file)
           // has arrived.
           cons.w = cons.e;
@@ -237,14 +274,12 @@ ConsSetFlag(int flg, int set){
 
 void GetConsState(struct cons_state *state){
   acquire(&cons.lock);
-    state->flags = cons.state.flags;
-    state->mode  = cons.state.mode;
+  memmove(state,&cons.state,sizeof(cons.state));
   release(&cons.lock);
 }
 void SetConsState(struct cons_state* state){
   acquire(&cons.lock);
-    cons.state.flags = state->flags;
-    cons.state.mode  = state->mode;
+  memmove(&cons.state,state,sizeof(cons.state));
   release(&cons.lock);
 }
 
@@ -254,8 +289,9 @@ consoleinit(void)
   initlock(&cons.lock, "cons");
 
   uartinit();
-  cons.state.flags |= CONS_FLG_ECHO;
-  printf("console state %d\n",cons.state.flags);
+  cons.state.flags |= ~0;
+  cons.state.vmin   = 1e6; // large number for buffered
+  cons.state.vtime = 0;
   // connect read and write system calls
   // to consoleread and consolewrite.
   devsw[CONSOLE].read = consoleread;
