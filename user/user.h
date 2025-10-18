@@ -5,6 +5,10 @@
 #define KEY_RIGHT 1004
 #define KEY_HOME  1005 
 
+#define STDIN 0
+#define STDOUT 1
+#define STERR 2
+
 struct stat;
 struct pagestat;
 struct procinfo;
