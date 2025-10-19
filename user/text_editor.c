@@ -3,23 +3,19 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/console.h"
-
+#include <stdbool.h>
 /*** defines  ***/
+#define PIM_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
-
-typedef enum
-{
-  false = 0,
-  true = 1
-} bool;
+#define NULL 0
 
 /*** data ***/
 struct editorConfig {
   int rows;
   int columns;
+  struct cons_state cs_initial;
 };
 struct editorConfig E;
-struct cons_state cs_initial, cs_raw;
 
 void get_window_size(int *rows, int *cols);
 bool isCntrl(unsigned char c);
@@ -42,19 +38,77 @@ char editorReadKey()
   return c;
 }
 
-/*** output ***/
-void editorDrawRows() {
-  int y;
-  for (y = 0; y < E.rows; y++) {
-    write(STDOUT, "~\r\n", 3);
-  }
+/*** append buffer ***/
+struct abuf {
+  char *b;
+  int len;
+};
+#define ABUF_INIT {NULL, 0}
+void abAppend(struct abuf *ab, const char *s, int len) {
+  char *new = malloc(ab->len+len);
+  if (new == NULL) return;
+  if(ab->b)
+    memcpy(new,ab->b,ab->len);
+  memcpy(&new[ab->len], s, len);
+  if(ab->b)
+    free(ab->b);
+  ab->b = new;
+  ab->len += len;
+}
+void abFree(struct abuf *ab) {
+  if(ab->b)
+    free(ab->b);
+  ab->b = 0;
+  ab->len = 0;
 }
 
+/*** output ***/
+void
+editorDrawRows(struct abuf *ab)
+{
+  int y;
+  for (y = 0; y < E.rows; y++) {
+    if (y == E.rows / 3) {
+      char welcome[80] = "PIM editor -- version ";
+      strcat(welcome, PIM_VERSION);
+
+      int welcomelen = strlen(welcome);
+      if (welcomelen > E.columns)
+        welcomelen = E.columns;
+
+      int padding = (E.columns - welcomelen) / 2;
+      if (padding) {
+        abAppend(ab, "~", 1);
+        padding--;
+      }
+
+      while (padding-- > 0)
+        abAppend(ab, " ", 1);
+
+      abAppend(ab, welcome, welcomelen);
+    } else {
+      abAppend(ab, "~", 1);
+    }
+    // clear to end of line
+    abAppend(ab, "\x1b[K", 3);
+    // move to next line (except after the last one)
+    if (y < E.rows - 1)
+      abAppend(ab, "\r\n", 2);
+  }
+}
 void editorRefreshScreen() {
-  write(STDOUT, "\x1b[2J", 4);
-  write(STDOUT, "\x1b[H", 3);
-  editorDrawRows();
-  write(STDOUT, "\x1b[H", 3);
+  struct abuf ab = ABUF_INIT;
+  
+  abAppend(&ab, "\x1b[?25l", 6);//hide cursor
+  abAppend(&ab, "\x1b[H", 3);//move to home
+  
+  editorDrawRows(&ab);
+  
+  abAppend(&ab, "\x1b[?25h", 6);//show cursor
+  abAppend(&ab, "\x1b[H", 3);
+  
+  write(STDOUT, ab.b, ab.len);
+  abFree(&ab);
 }
 
 /*** input ***/
@@ -87,7 +141,7 @@ bool isCntrl(unsigned char c)
 }
 
 void resetConsole(){
-  SetConsState(&cs_initial);
+  SetConsState(&E.cs_initial);
 }
 void die(const char *s)
 {
@@ -104,10 +158,11 @@ void cleanupAndExit(int status){
 }
 void enableRawMode()
 {
-  if (GetConsState(&cs_initial) < 0)
+  if (GetConsState(&E.cs_initial) < 0)
     die("Unable to get initial consState\n");
 
-  cs_raw = cs_initial;
+  struct cons_state cs_raw;
+  cs_raw = E.cs_initial;
   cs_raw.mode = CONS_RAW;
   cs_raw.flags = 0;
   cs_raw.vmin = 0;
