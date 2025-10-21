@@ -62,6 +62,10 @@ void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
 void* malloc(uint);
 void free(void*);
 
+//snprintf.c
+void putint(char *buf, int *pos, int d);
+void snprintf(char *buf, char *fmt, ...);
+
 int getfreemem(void);
 int getpagestat(int pid, struct pagestat *st);
 int dumpmru(int);
