@@ -1,3 +1,7 @@
+#define float  FLOATS_NOT_SUPPORTED_IN_XV6
+#define double FLOATS_NOT_SUPPORTED_IN_XV6
+
+
 #define SBRK_ERROR ((char *)-1)
 #define KEY_UP    1001
 #define KEY_DOWN  1002

@@ -75,11 +75,12 @@ int getline(char **buf, int *len, int fp)
     return -1;
   char c;
   int n = 0;
-  float grow_factor = 1.5;
+  float grow_factor = 2;
 
-  if (*buf == 0)
+  if (*len == 0)
   {
     *len = 10;
+    if(*buf)free(*buf);
     *buf = malloc(*len);
     if (*buf == 0)
       return -1;
@@ -88,10 +89,10 @@ int getline(char **buf, int *len, int fp)
   {
     if (read(fp, &c, 1) <= 0)
       break;
-    if (n >= *len - 1)
+    if (n >= (*len) - 1)
     { 
-      int new_len = (int)(*len * grow_factor);
-      char *tmp = malloc(new_len);
+      int new_len = n * grow_factor;
+      char *tmp = (char*)malloc(new_len);
       if (tmp == 0)
         return -1;
       memmove(tmp, *buf, n);
