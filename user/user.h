@@ -53,7 +53,6 @@ int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
 char* sbrk(int);
 char* sbrklazy(int);
-int getline(char **buf, int *len, int fp);
 
 // printf.c
 void fprintf(int, const char*, ...) __attribute__ ((format (printf, 2, 3)));
@@ -66,6 +65,8 @@ void free(void*);
 //snprintf.c
 void putint(char *buf, int *pos, int d);
 void snprintf(char *buf, char *fmt, ...);
+
+int getline(char **buf, int *len, int fp);
 
 int getfreemem(void);
 int getpagestat(int pid, struct pagestat *st);
