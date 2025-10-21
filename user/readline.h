@@ -6,6 +6,6 @@
 
 int setupConsole();
 void clear_line(int bufidx);
-int getLine(char *dest);
+int history_getline(char *dest);
 
 #endif
