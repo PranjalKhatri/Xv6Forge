@@ -101,7 +101,7 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/readline.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/readline.o $U/snprintf.o
 U_CFLAGS = $(CFLAGS) -pie -fPIE -fPIC -static
 U_LDFLAGS = $(LDFLAGS) -pie -fPIE -shared
 
