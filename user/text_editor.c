@@ -3,13 +3,14 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "kernel/console.h"
+#include "kernel/fcntl.h"
 #include <stdbool.h>
 #include <stdarg.h>
 /*** defines  ***/
 #define PIM_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define NULL 0
-
+#define ssize_t int
 enum editorKey
 {
   ARROW_LEFT = 'h',
@@ -24,11 +25,18 @@ enum editorKey
 };
 
 /*** data ***/
+typedef struct erow {
+  int size;
+  char *chars;
+} erow;
+
 struct editorConfig
 {
   int cx, cy;
-  int rows;
-  int columns;
+  int screenrows;
+  int screencolumns;
+  int numrows;
+  erow row;
   struct cons_state cs_initial;
 };
 struct editorConfig E;
@@ -123,6 +131,31 @@ int editorReadKey()
   }
 }
 
+
+/*** file i/o ***/
+void editorOpen(char *filename) {
+  int fp = open(filename,O_RDONLY);
+  if (fp < 0) die("fopen");
+  char *line = NULL;
+  ssize_t linecap = 0;
+  ssize_t linelen;
+  printf("past file openeing\n");
+  linelen = getline(&line, &linecap, fp);
+  printf("getline returned : %d\n",linelen);
+  if (linelen != -1) {
+    while (linelen > 0 && (line[linelen - 1] == '\n' ||
+                           line[linelen - 1] == '\r'))
+      linelen--;
+    E.row.size = linelen;
+    E.row.chars = malloc(linelen + 1);
+    memcpy(E.row.chars, line, linelen);
+    E.row.chars[linelen] = '\0';
+    E.numrows = 1;
+  }
+  free(line);
+  close(fp);
+}
+
 /*** append buffer ***/
 struct abuf
 {
@@ -155,37 +188,47 @@ void abFree(struct abuf *ab)
 void editorDrawRows(struct abuf *ab)
 {
   int y;
-  for (y = 0; y < E.rows; y++)
+  for (y = 0; y < E.screenrows; y++)
   {
-    if (y == E.rows / 3)
+    if (y >= E.numrows)
     {
-      char welcome[80] = "PIM editor -- version ";
-      strcat(welcome, PIM_VERSION);
+      if (E.numrows == 0 && y == E.screenrows / 3)
+      {
+        char welcome[80] = "PIM editor -- version ";
+        strcat(welcome, PIM_VERSION);
 
-      int welcomelen = strlen(welcome);
-      if (welcomelen > E.columns)
-        welcomelen = E.columns;
+        int welcomelen = strlen(welcome);
+        if (welcomelen > E.screencolumns)
+          welcomelen = E.screencolumns;
 
-      int padding = (E.columns - welcomelen) / 2;
-      if (padding)
+        int padding = (E.screencolumns - welcomelen) / 2;
+        if (padding)
+        {
+          abAppend(ab, "~", 1);
+          padding--;
+        }
+
+        while (padding-- > 0)
+          abAppend(ab, " ", 1);
+
+        abAppend(ab, welcome, welcomelen);
+      }
+      else
       {
         abAppend(ab, "~", 1);
-        padding--;
       }
-
-      while (padding-- > 0)
-        abAppend(ab, " ", 1);
-
-      abAppend(ab, welcome, welcomelen);
     }
     else
     {
-      abAppend(ab, "~", 1);
+      int len = E.row.size;
+      if (len > E.screencolumns)
+        len = E.screencolumns;
+      abAppend(ab, E.row.chars, len);
     }
     // clear to end of line
     abAppend(ab, "\x1b[K", 3);
     // move to next line (except after the last one)
-    if (y < E.rows - 1)
+    if (y < E.screenrows - 1)
       abAppend(ab, "\r\n", 2);
   }
 }
@@ -217,11 +260,11 @@ void editorMoveCursor(char key)
       E.cx--;
     break;
   case ARROW_RIGHT:
-    if (E.cx != E.columns - 1)
+    if (E.cx != E.screencolumns - 1)
       E.cx++;
     break;
   case ARROW_DOWN:
-    if (E.cy != E.rows - 1)
+    if (E.cy != E.screenrows - 1)
       E.cy++;
     break;
   case ARROW_UP:
@@ -242,12 +285,12 @@ void editorProcessKeypress()
     E.cx = 0;
     break;
   case END_KEY:
-    E.cx = E.columns - 1;
+    E.cx = E.screencolumns - 1;
     break;
   case PAGE_UP:
   case PAGE_DOWN:
   {
-    int times = E.rows;
+    int times = E.screenrows;
     while (times--)
       editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
   }
@@ -267,13 +310,17 @@ void initEditor()
 {
   E.cx = 0;
   E.cy = 0;
-  get_window_size(&E.rows, &E.columns);
+  E.numrows = 0;
+  get_window_size(&E.screenrows, &E.screencolumns);
 }
 
-int main()
+int main(int argc, char **argv)
 {
   enableRawMode();
   initEditor();
+  if(argc >= 2){
+    editorOpen(argv[1]);
+  }
   while (1)
   {
     editorRefreshScreen();
